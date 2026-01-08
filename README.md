@@ -77,21 +77,32 @@ nano .env
 
 #### Option A: Provided Certificates (Default)
 
-1. Create certificate directory and place certificates:
+**A1. Using Self-Signed Certificates** (development/testing only)
+
 ```bash
+# Generate self-signed certificates automatically
+chmod +x scripts/init-selfsigned.sh
+./scripts/init-selfsigned.sh
+
+# Start stack
+docker compose up -d
+```
+
+**WARNING:** Self-signed certificates show browser warnings. Not for production!
+
+**A2. Using Real Certificates** (production)
+
+```bash
+# Create certificate directory and place your certificates
 mkdir -p certs
 # Copy your certificates:
 # certs/fullchain.pem - Full certificate chain
 # certs/privkey.pem - Private key
-```
 
-2. Generate DH parameters (recommended):
-```bash
+# Generate DH parameters (recommended)
 openssl dhparam -out nginx/dhparam.pem 2048
-```
 
-3. Start stack:
-```bash
+# Start stack
 docker compose up -d
 ```
 
@@ -394,7 +405,8 @@ docker compose logs nginx
 │
 └── scripts/
     ├── init-env.sh               # Environment initialization (generates secrets)
-    └── init-letsencrypt.sh       # Let's Encrypt initialization
+    ├── init-selfsigned.sh        # Self-signed certificate generator (dev/test)
+    └── init-letsencrypt.sh       # Let's Encrypt initialization (production)
 ```
 
 ## 🔐 Security Checklist
