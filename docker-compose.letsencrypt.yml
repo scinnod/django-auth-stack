@@ -1,0 +1,78 @@
+# =============================================================================
+# Docker Compose Override for Let's Encrypt Mode
+# =============================================================================
+# This file adds certbot for automated TLS certificate issuance/renewal
+# via Let's Encrypt ACME protocol.
+#
+# USAGE:
+#   1. Run init-letsencrypt.sh script first to obtain initial certificates
+#   2. Start stack with both compose files:
+#      docker compose -f docker-compose.yml -f docker-compose.letsencrypt.yml up -d
+#
+# The certbot container will:
+#   - Obtain initial certificates (via init script)
+#   - Automatically renew certificates before expiry
+#   - Share certificate files with nginx via volume
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # ===========================================================================
+  # Nginx - Override volumes for Let's Encrypt mode
+  # ===========================================================================
+  nginx:
+    volumes:
+      # Override certificate mount to use Let's Encrypt directory structure
+      # Certbot creates: /etc/letsencrypt/live/<domain>/{fullchain,privkey}.pem
+      # and symlinks at /etc/letsencrypt/{fullchain,privkey}.pem
+      - certbot_certs:/etc/letsencrypt:ro
+      
+      # Webroot for ACME HTTP-01 challenge
+      # Certbot writes challenge files here, nginx serves them
+      - certbot_webroot:/var/www/certbot:ro
+    depends_on:
+      - certbot
+
+  # ===========================================================================
+  # Certbot - Automated certificate issuance & renewal
+  # ===========================================================================
+  certbot:
+    image: certbot/certbot:latest
+    container_name: edge_certbot
+    restart: unless-stopped
+    
+    # Run in renewal mode: check twice daily, renew if needed
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot --webroot-path=/var/www/certbot --quiet; sleep 12h & wait $${!}; done;'"
+    
+    volumes:
+      # Certificate storage (shared with nginx)
+      - certbot_certs:/etc/letsencrypt
+      
+      # Webroot for ACME challenges (shared with nginx)
+      - certbot_webroot:/var/www/certbot
+      
+      # Certbot logs
+      - certbot_logs:/var/log/letsencrypt
+    
+    networks:
+      - proxy
+    
+    security_opt:
+      - no-new-privileges:true
+
+# =============================================================================
+# Additional Volumes for Let's Encrypt
+# =============================================================================
+volumes:
+  # Certificate storage (Let's Encrypt directory structure)
+  certbot_certs:
+    driver: local
+  
+  # ACME challenge webroot
+  certbot_webroot:
+    driver: local
+  
+  # Certbot logs
+  certbot_logs:
+    driver: local

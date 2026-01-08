@@ -1,0 +1,40 @@
+# Add .env to .gitignore to prevent committing secrets
+.env
+
+# Ignore certificate files (sensitive)
+certs/*.pem
+certs/live/
+certs/archive/
+certs/renewal/
+
+# Ignore DH parameters
+nginx/dhparam.pem
+
+# Docker volumes (managed by Docker)
+postgres_data/
+redis_data/
+authentik_media/
+authentik_templates/
+nginx_logs/
+certbot_certs/
+certbot_webroot/
+certbot_logs/
+
+# Backup files
+*.sql
+*.sql.gz
+backup_*/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Logs
+*.log

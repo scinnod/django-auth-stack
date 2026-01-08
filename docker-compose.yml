@@ -1,0 +1,257 @@
+# =============================================================================
+# Edge-Auth Stack: nginx reverse proxy + Authentik SSO
+# =============================================================================
+# This compose file defines the authentication gateway stack:
+#   - nginx: public-facing reverse proxy (ports 80/443)
+#   - authentik-server & authentik-worker: SSO/authentication
+#   - postgres & redis: Authentik dependencies
+#
+# NETWORKS (defense-in-depth segmentation):
+#   - proxy: public-facing, nginx only (auto-created)
+#   - auth_backend (internal): nginx <-> authentik-server
+#   - itsm_backend (external): nginx <-> itsm_nginx container
+#   - deepl_backend (external): nginx <-> deepl_nginx container
+#   - authentik_db (internal): authentik services <-> postgres/redis
+#
+# EXTERNAL NETWORKS must be created manually before starting:
+#   docker network create itsm_backend
+#   docker network create deepl_backend
+#
+# These networks are shared with the upstream application containers.
+# On the itsm_backend network, the itsm_nginx container must be accessible.
+# On the deepl_backend network, the deepl_nginx container must be accessible.
+#
+# TLS MODES:
+#   Default: Use provided certificates (mount ./certs/)
+#   Let's Encrypt: Use docker-compose.letsencrypt.yml override
+#     docker compose -f docker-compose.yml -f docker-compose.letsencrypt.yml up -d
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # ===========================================================================
+  # PostgreSQL - Authentik database
+  # ===========================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: edge_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-authentik}
+      POSTGRES_USER: ${POSTGRES_USER:-authentik}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - authentik_db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-authentik}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+
+  # ===========================================================================
+  # Redis - Authentik cache & message broker
+  # ===========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: edge_redis
+    restart: unless-stopped
+    command: --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    networks:
+      - authentik_db
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+
+  # ===========================================================================
+  # Authentik Server - SSO/authentication server
+  # ===========================================================================
+  authentik-server:
+    image: ghcr.io/goauthentik/server:${AUTHENTIK_VERSION:-2024.10.1}
+    container_name: edge_authentik_server
+    restart: unless-stopped
+    command: server
+    environment:
+      # Core configuration
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:?AUTHENTIK_SECRET_KEY must be set}
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      
+      # Database
+      AUTHENTIK_POSTGRESQL__HOST: postgres
+      AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_DB:-authentik}
+      AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_USER:-authentik}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      
+      # Redis
+      AUTHENTIK_REDIS__HOST: redis
+      
+      # Web server
+      AUTHENTIK_LISTEN__HTTP: 0.0.0.0:9000
+      AUTHENTIK_LISTEN__HTTPS: 0.0.0.0:9443
+      
+      # Outpost configuration - critical for nginx integration
+      # The outpost will be accessible at https://auth.example.org
+      AUTHENTIK_COOKIE_DOMAIN: ${AUTHENTIK_COOKIE_DOMAIN:-.example.org}
+      
+      # Email (optional - configure for production)
+      AUTHENTIK_EMAIL__HOST: ${AUTHENTIK_EMAIL_HOST:-}
+      AUTHENTIK_EMAIL__PORT: ${AUTHENTIK_EMAIL_PORT:-587}
+      AUTHENTIK_EMAIL__USERNAME: ${AUTHENTIK_EMAIL_USERNAME:-}
+      AUTHENTIK_EMAIL__PASSWORD: ${AUTHENTIK_EMAIL_PASSWORD:-}
+      AUTHENTIK_EMAIL__USE_TLS: ${AUTHENTIK_EMAIL_USE_TLS:-false}
+      AUTHENTIK_EMAIL__FROM: ${AUTHENTIK_EMAIL_FROM:-}
+    volumes:
+      - authentik_media:/media
+      - authentik_templates:/templates
+    networks:
+      - auth_backend
+      - authentik_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9000/-/health/live/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    security_opt:
+      - no-new-privileges:true
+
+  # ===========================================================================
+  # Authentik Worker - Background task processor
+  # ===========================================================================
+  authentik-worker:
+    image: ghcr.io/goauthentik/server:${AUTHENTIK_VERSION:-2024.10.1}
+    container_name: edge_authentik_worker
+    restart: unless-stopped
+    command: worker
+    environment:
+      # Must match authentik-server settings
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:?AUTHENTIK_SECRET_KEY must be set}
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      
+      AUTHENTIK_POSTGRESQL__HOST: postgres
+      AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_DB:-authentik}
+      AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_USER:-authentik}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      
+      AUTHENTIK_REDIS__HOST: redis
+      
+      # Email (must match server if configured)
+      AUTHENTIK_EMAIL__HOST: ${AUTHENTIK_EMAIL_HOST:-}
+      AUTHENTIK_EMAIL__PORT: ${AUTHENTIK_EMAIL_PORT:-587}
+      AUTHENTIK_EMAIL__USERNAME: ${AUTHENTIK_EMAIL_USERNAME:-}
+      AUTHENTIK_EMAIL__PASSWORD: ${AUTHENTIK_EMAIL_PASSWORD:-}
+      AUTHENTIK_EMAIL__USE_TLS: ${AUTHENTIK_EMAIL_USE_TLS:-false}
+      AUTHENTIK_EMAIL__FROM: ${AUTHENTIK_EMAIL_FROM:-}
+    volumes:
+      - authentik_media:/media
+      - authentik_templates:/templates
+    networks:
+      - authentik_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+
+  # ===========================================================================
+  # Nginx - Reverse proxy & TLS termination (PUBLIC ENTRYPOINT)
+  # ===========================================================================
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: edge_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Main nginx configuration
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      
+      # Virtual host configurations
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      
+      # TLS certificates
+      # Mode A (default): Mount provided certs from ./certs/
+      #   Place fullchain.pem and privkey.pem in ./certs/
+      # Mode B (Let's Encrypt): Overridden by docker-compose.letsencrypt.yml
+      #   Certbot volume mounted instead
+      - ./certs:/etc/letsencrypt:ro
+      
+      # DH parameters for enhanced TLS security (optional but recommended)
+      # Generate: openssl dhparam -out ./nginx/dhparam.pem 2048
+      - ./nginx/dhparam.pem:/etc/nginx/dhparam.pem:ro
+      
+      # Logs
+      - nginx_logs:/var/log/nginx
+    networks:
+      - proxy           # Public-facing
+      - auth_backend    # -> authentik-server
+      - itsm_backend    # -> itsm_nginx:8000
+      - deepl_backend   # -> deepl_nginx:8000
+    depends_on:
+      - authentik-server
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  # Public-facing network (auto-created, only used by this stack)
+  proxy:
+    driver: bridge
+  
+  # Internal: nginx <-> authentik-server
+  auth_backend:
+    internal: true
+    driver: bridge
+  
+  # External: nginx <-> itsm_nginx container (must be created manually)
+  itsm_backend:
+    external: true
+  
+  # External: nginx <-> deepl_nginx container (must be created manually)
+  deepl_backend:
+    external: true
+  
+  # Internal: authentik services <-> postgres/redis
+  authentik_db:
+    internal: true
+    driver: bridge
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  authentik_media:
+    driver: local
+  authentik_templates:
+    driver: local
+  nginx_logs:
+    driver: local
