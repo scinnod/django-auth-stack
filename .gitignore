@@ -1,6 +1,10 @@
 # Add .env to .gitignore to prevent committing secrets
 .env
 
+# Generated nginx configs (created from templates at runtime)
+nginx/conf.d/*.conf
+!nginx/conf.d/*.conf.template
+
 # Ignore certificate files (sensitive)
 certs/*.pem
 certs/live/

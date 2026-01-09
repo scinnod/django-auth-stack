@@ -154,6 +154,9 @@ fi
 
 if [ -n "$domain_auth" ]; then
     $SED_INPLACE "s|DOMAIN_AUTH=auth.example.org|DOMAIN_AUTH=${domain_auth}|g" .env
+    # Also update AUTHENTIK_HOST to match
+    $SED_INPLACE "s|AUTHENTIK_HOST=https://auth.example.org|AUTHENTIK_HOST=https://${domain_auth}|g" .env
+    $SED_INPLACE "s|AUTHENTIK_HOST_BROWSER=https://auth.example.org|AUTHENTIK_HOST_BROWSER=https://${domain_auth}|g" .env
 fi
 
 # SMTP configuration

@@ -18,11 +18,19 @@
 
 set -e  # Exit on any error
 
-# Configuration
+# Load .env file if it exists
+if [ -f .env ]; then
+    # Export variables from .env (ignore comments and empty lines)
+    set -a
+    source <(grep -v '^#' .env | grep -v '^$' | sed 's/\r$//')
+    set +a
+fi
+
+# Configuration - domains read from .env
 DOMAINS=(
-    "itsm.example.org"
-    "deepl.example.org"
-    "auth.example.org"
+    "${DOMAIN_AUTH:-auth.example.org}"
+    "${DOMAIN_ITSM:-itsm.example.org}"
+    "${DOMAIN_DEEPL:-deepl.example.org}"
 )
 EMAIL="${LETSENCRYPT_EMAIL:-admin@example.org}"  # From .env or default
 STAGING=0  # Set to 1 for testing (avoids rate limits)

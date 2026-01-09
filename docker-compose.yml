@@ -101,6 +101,8 @@ services:
       
       # Outpost configuration - critical for nginx integration
       # The outpost will be accessible at https://auth.example.org
+      AUTHENTIK_HOST: ${AUTHENTIK_HOST:-https://auth.example.org}
+      AUTHENTIK_HOST_BROWSER: ${AUTHENTIK_HOST_BROWSER:-https://auth.example.org}
       AUTHENTIK_COOKIE_DOMAIN: ${AUTHENTIK_COOKIE_DOMAIN:-.example.org}
       
       # Email (optional - configure for production)
@@ -121,12 +123,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9000/-/health/live/ || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 90s
     security_opt:
       - no-new-privileges:true
 
@@ -167,6 +163,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      authentik-server:
+        condition: service_started
     security_opt:
       - no-new-privileges:true
 
@@ -177,15 +175,26 @@ services:
     image: nginx:1.27-alpine
     container_name: edge_nginx
     restart: unless-stopped
+    # Custom entrypoint for environment variable substitution
+    entrypoint: /docker-entrypoint.sh
+    command: ["nginx", "-g", "daemon off;"]
+    environment:
+      # Domain configuration (substituted in nginx configs at startup)
+      DOMAIN_AUTH: ${DOMAIN_AUTH:-auth.example.org}
+      DOMAIN_ITSM: ${DOMAIN_ITSM:-itsm.example.org}
+      DOMAIN_DEEPL: ${DOMAIN_DEEPL:-deepl.example.org}
     ports:
       - "80:80"
       - "443:443"
     volumes:
+      # Custom entrypoint script
+      - ./nginx/docker-entrypoint.sh:/docker-entrypoint.sh:ro
+      
       # Main nginx configuration
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       
-      # Virtual host configurations
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      # Virtual host configuration TEMPLATES (processed by entrypoint)
+      - ./nginx/conf.d:/etc/nginx/conf.d:rw
       
       # TLS certificates
       # Mode A (default): Mount provided certs from ./certs/

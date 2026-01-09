@@ -1,13 +1,18 @@
 # =============================================================================
-# DeepL Application - deepl.example.org
+# ITSM Application - itsm.example.org
 # =============================================================================
-# Access policy: FULLY AUTHENTICATED
-#   - ALL paths require authentication via Authentik
-#   - Forward user identity headers to upstream:
-#       * X-Remote-User: username from Authentik
-#       * X-Remote-Email: email from Authentik
+# Access policy: MIXED (public + authenticated)
+#   - Most paths are PUBLIC (no authentication required)
+#   - Specific path prefixes require authentication:
+#       * /admin/ and all subpaths
+#       * /restricted/ and all subpaths
+#       * /api/private/ and all subpaths
 #
-# Upstream: deepl_nginx:8000 (external container on deepl_backend network)
+# For authenticated paths, forward user identity headers to upstream:
+#   - X-Remote-User: username from Authentik
+#   - X-Remote-Email: email from Authentik
+#
+# Upstream: itsm_nginx:8000 (external container on itsm_backend network)
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -16,7 +21,7 @@
 server {
     listen 80;
     listen [::]:80;
-    server_name translation.jade.local;
+    server_name ${DOMAIN_ITSM};
 
     # Allow ACME challenge for Let's Encrypt (if using LE mode)
     location /.well-known/acme-challenge/ {
@@ -26,17 +31,17 @@ server {
 
     # Redirect all other HTTP traffic to HTTPS
     location / {
-        return 301 https://translation.jade.local$request_uri;
+        return 301 https://${DOMAIN_ITSM}$request_uri;
     }
 }
 
 # -----------------------------------------------------------------------------
-# HTTPS - DeepL Application (Fully Authenticated)
+# HTTPS - ITSM Application
 # -----------------------------------------------------------------------------
 server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
-    server_name translation.jade.local;
+    server_name ${DOMAIN_ITSM};
 
     # -------------------------------------------------------------------------
     # TLS Configuration
@@ -56,8 +61,8 @@ server {
     # -------------------------------------------------------------------------
     # Logging (with authentication info)
     # -------------------------------------------------------------------------
-    access_log /var/log/nginx/deepl.example.org.access.log auth;
-    error_log /var/log/nginx/deepl.example.org.error.log warn;
+    access_log /var/log/nginx/itsm.example.org.access.log auth;
+    error_log /var/log/nginx/itsm.example.org.error.log warn;
 
     # -------------------------------------------------------------------------
     # Rate Limiting
@@ -65,9 +70,10 @@ server {
     limit_req zone=general burst=50 nodelay;
 
     # -------------------------------------------------------------------------
-    # ALL PATHS - Require Authentik Authentication
+    # PROTECTED PATHS - Require Authentik Authentication
     # -------------------------------------------------------------------------
-    location / {
+    # /admin/* - Administrative interface
+    location /admin/ {
         # ------------------------
         # Authentik Forward Auth
         # ------------------------
@@ -75,7 +81,7 @@ server {
         auth_request /auth-verify;
         
         # On auth failure, redirect to Authentik login
-        error_page 401 = @error_auth_deepl;
+        error_page 401 = @error_auth_itsm;
         
         # Capture identity from Authentik response headers
         auth_request_set $auth_resp_x_authentik_username $upstream_http_x_authentik_username;
@@ -105,12 +111,84 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-Host $host;
         
-        # WebSocket support (if needed by application)
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection $connection_upgrade;
+        # Proxy to upstream ITSM app
+        proxy_pass http://itsm_nginx:8000;
+    }
+
+    # /restricted/* - Restricted content area
+    location /restricted/ {
+        # Same authentication configuration as /admin/
+        auth_request /auth-verify;
+        error_page 401 = @error_auth_itsm;
         
-        # Proxy to upstream DeepL app
-        proxy_pass http://deepl_nginx:8000;
+        auth_request_set $auth_resp_x_authentik_username $upstream_http_x_authentik_username;
+        auth_request_set $auth_resp_x_authentik_email $upstream_http_x_authentik_email;
+        auth_request_set $auth_resp_set_cookie $upstream_http_set_cookie;
+        add_header Set-Cookie $auth_resp_set_cookie;
+        
+        # Anti-spoofing + forward identity
+        proxy_set_header X-Remote-User "";
+        proxy_set_header X-Remote-Email "";
+        proxy_set_header X-Remote-User $auth_user;
+        proxy_set_header X-Remote-Email $auth_email;
+        
+        # Standard headers
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        
+        proxy_pass http://itsm_nginx:8000;
+    }
+
+    # /api/private/* - Private API endpoints
+    location /api/private/ {
+        # Same authentication configuration as /admin/
+        auth_request /auth-verify;
+        error_page 401 = @error_auth_itsm;
+        
+        auth_request_set $auth_resp_x_authentik_username $upstream_http_x_authentik_username;
+        auth_request_set $auth_resp_x_authentik_email $upstream_http_x_authentik_email;
+        auth_request_set $auth_resp_set_cookie $upstream_http_set_cookie;
+        add_header Set-Cookie $auth_resp_set_cookie;
+        
+        # Anti-spoofing + forward identity
+        proxy_set_header X-Remote-User "";
+        proxy_set_header X-Remote-Email "";
+        proxy_set_header X-Remote-User $auth_user;
+        proxy_set_header X-Remote-Email $auth_email;
+        
+        # Standard headers
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        
+        proxy_pass http://itsm_nginx:8000;
+    }
+
+    # -------------------------------------------------------------------------
+    # PUBLIC PATHS - No Authentication Required
+    # -------------------------------------------------------------------------
+    location / {
+        # ------------------------
+        # Anti-Spoofing: ALWAYS clear identity headers for public paths
+        # ------------------------
+        # CRITICAL: Prevent clients from injecting fake identity headers
+        proxy_set_header X-Remote-User "";
+        proxy_set_header X-Remote-Email "";
+        
+        # Standard proxy headers
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        
+        # Proxy to upstream ITSM app
+        proxy_pass http://itsm_nginx:8000;
     }
 
     # -------------------------------------------------------------------------
@@ -145,8 +223,8 @@ server {
     # -------------------------------------------------------------------------
     # Error Handler: Authentication Required
     # -------------------------------------------------------------------------
-    location @error_auth_deepl {
+    location @error_auth_itsm {
         # Redirect to Authentik login with return URL
-        return 302 https://auth.jade.local/outpost.goauthentik.io/start?rd=$scheme://$http_host$request_uri;
+        return 302 https://${DOMAIN_AUTH}/outpost.goauthentik.io/start?rd=$scheme://$http_host$request_uri;
     }
 }

@@ -16,7 +16,7 @@
 server {
     listen 80;
     listen [::]:80;
-    server_name translation.jade.local;
+    server_name ${DOMAIN_DEEPL};
 
     # Allow ACME challenge for Let's Encrypt (if using LE mode)
     location /.well-known/acme-challenge/ {
@@ -26,7 +26,7 @@ server {
 
     # Redirect all other HTTP traffic to HTTPS
     location / {
-        return 301 https://translation.jade.local$request_uri;
+        return 301 https://${DOMAIN_DEEPL}$request_uri;
     }
 }
 
@@ -36,7 +36,7 @@ server {
 server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
-    server_name translation.jade.local;
+    server_name ${DOMAIN_DEEPL};
 
     # -------------------------------------------------------------------------
     # TLS Configuration
@@ -147,6 +147,6 @@ server {
     # -------------------------------------------------------------------------
     location @error_auth_deepl {
         # Redirect to Authentik login with return URL
-        return 302 https://auth.jade.local/outpost.goauthentik.io/start?rd=$scheme://$http_host$request_uri;
+        return 302 https://${DOMAIN_AUTH}/outpost.goauthentik.io/start?rd=$scheme://$http_host$request_uri;
     }
 }
