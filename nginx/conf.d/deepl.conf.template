@@ -1,9 +1,24 @@
 # =============================================================================
 # Translation Service Virtual Host Configuration (Keycloak + OAuth2 Proxy)
 # =============================================================================
+# AUTHENTICATION PATTERN: Full nginx-Level Authentication
+#
+# This configuration requires Keycloak login for ALL requests (including static
+# files, images, etc.). Useful for fully secured services where nothing should
+# be publicly accessible.
+#
 # Domain: ${DOMAIN_DEEPL} (e.g., translation.jade.local)
 # Upstream: deepl_nginx:8000 (external Docker container on deepl_backend network)
-# Authentication: ALL paths require Keycloak authentication
+#
+# How it works:
+#   1. Every request checked by OAuth2-proxy before reaching Django
+#   2. If not authenticated, redirect to Keycloak login
+#   3. After Keycloak login, nginx passes X-Remote-User header to Django
+#   4. Django RemoteUserMiddleware creates session from header
+#   5. All subsequent requests also checked (fast cookie validation)
+#
+# Alternative Pattern: See itsm.conf.template for Django-controlled authentication
+# (where Django decides which pages are public vs protected)
 # =============================================================================
 
 server {

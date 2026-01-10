@@ -1,58 +1,80 @@
 # Django Integration with Keycloak via OAuth2-proxy
 
-This document describes the **standard** Django configuration pattern for integrating with Keycloak SSO using OAuth2-proxy as the authentication gateway.
+This document describes the **standard** Django configuration patterns for integrating with Keycloak SSO using OAuth2-proxy as the authentication gateway.
 
-## Architecture Overview
+## Two Authentication Patterns
+
+This stack provides **two scaffold configurations** for different use cases:
+
+### Pattern A: Django-Controlled Authentication (ITSM service)
+
+**When to use:** You want Django to control which pages are public vs protected.
+
+**How it works:**
+- Public Django pages accessible without Keycloak login
+- Django `@login_required` decorator triggers Keycloak authentication
+- Special `/sso-login/` endpoint handles OAuth2-proxy authentication
+- After Keycloak login, Django session handles subsequent requests
+- **Example:** Public marketing pages, blog, docs; login required for dashboard/admin
+
+**nginx config:** `itsm.conf.template`
+
+### Pattern B: Full nginx-Level Authentication (DeepL service)
+
+**When to use:** Everything should be protected, no public pages.
+
+**How it works:**
+- ALL requests (including static files) require Keycloak login
+- nginx validates every request via OAuth2-proxy (fast cookie check)
+- Django receives authenticated user headers for all requests
+- Simple, secure, no public access whatsoever
+- **Example:** Internal tools, admin dashboards, confidential services
+
+**nginx config:** `deepl.conf.template`
+
+---
+
+## Pattern A: Django-Controlled Authentication (Recommended)
+
+This pattern gives you maximum flexibility - Django decides what's public.
+
+### Architecture Overview
 
 ```
-User → Nginx (TLS) → OAuth2-proxy → Keycloak (OIDC)
+User → Nginx (TLS) → Django (public pages served directly)
+         ↓
+       /sso-login/ endpoint → OAuth2-proxy → Keycloak (OIDC)
          ↓ (X-Remote-User header)
-       Django (RemoteUserBackend)
+       Django (RemoteUserBackend creates session)
 ```
 
-### Authentication Flow
+### Authentication Flow (Pattern A)
 
-1. **User accesses protected Django URL** (e.g., view with `@login_required`)
-2. **Nginx checks authentication** via `auth_request` to OAuth2-proxy
-3. **OAuth2-proxy validates session**:
-   - If valid → returns 200 with `X-Auth-Request-User` header
-   - If invalid → returns 401, nginx redirects to `/oauth2/start` → Keycloak login
-4. **Keycloak authenticates user** (username/password, LDAP, 2FA, etc.)
-5. **OAuth2-proxy creates session**, sets `X-Auth-Request-User` header
-6. **Nginx forwards request to Django** with `X-Remote-User` header
-7. **Django RemoteUserBackend**:
+1. **User accesses public Django page** → Django serves it normally (no Keycloak)
+2. **User accesses page with `@login_required`** → Django redirects to `/sso-login/?next=/protected/`
+3. **Nginx intercepts `/sso-login/`** → Checks OAuth2-proxy
+   - If not authenticated → OAuth2-proxy redirects to Keycloak login
+4. **User logs in via Keycloak** → OAuth2-proxy creates session cookie
+5. **OAuth2-proxy returns to `/sso-login/`** with `X-Auth-Request-User` header
+6. **Nginx passes request to Django** with `X-Remote-User` header
+7. **Django RemoteUserMiddleware**:
    - Reads `X-Remote-User` header
    - Creates/updates Django User object automatically
-   - Creates Django session
-8. **Django's `@login_required` decorator** sees authenticated user → allows access
+   - Creates Django session cookie
+8. **Django view redirects** to originally requested page (`/protected/`)
+9. **Subsequent requests** → Django session cookie only, no OAuth2-proxy involvement
 
-## Django Configuration
-
-### Automatic User Creation & Email Handling
-
-**Yes, Django receives the user's email address!** Nginx passes both username and email:
-- `X-Remote-User` header → Keycloak username (e.g., `david.kleinhans`)
-- `X-Remote-Email` header → Keycloak email (e.g., `david.kleinhans@jade-hs.de`)
-
-**Automatic User Creation:**
-When a user logs in via Keycloak for the first time, Django's `RemoteUserBackend` **automatically creates** a Django User account:
-- `username` = value from `X-Remote-User` header
-- `email` = empty by default (see below to populate from header)
-- `is_staff` = False
-- `is_superuser` = False
-- No password is set (authentication is handled by Keycloak)
-
-**To populate email automatically**, use a custom backend (see section 1 below).
-
-**Login with email vs username:**
-By default, Django uses the Keycloak **username** for authentication. If you want users to login with their **email** in Keycloak, configure Keycloak to use email as username, or use the email in the `X-Remote-User` header (see "Using Email as Username" section below).
+## Django Configuration (Pattern A)
 
 ### 1. Required Settings (`settings.py`)
 
 ```python
 # =============================================================================
-# AUTHENTICATION CONFIGURATION - Keycloak via OAuth2-proxy
+# AUTHENTICATION CONFIGURATION - Keycloak via OAuth2-proxy (Pattern A)
 # =============================================================================
+
+# IMPORTANT: Point Django's login to the SSO endpoint
+LOGIN_URL = '/sso-login/'
 
 # Authentication backends - MUST be in this order
 AUTHENTICATION_BACKENDS = [
@@ -71,6 +93,108 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+
+# Header configuration - tells RemoteUserMiddleware which header to trust
+REMOTE_USER_HEADER = 'HTTP_X_REMOTE_USER'
+```
+
+### 2. Create SSO Login View
+
+```python
+# views.py
+from django.shortcuts import redirect
+
+def sso_login(request):
+    """
+    SSO login endpoint. nginx adds X-Remote-User header here after Keycloak auth.
+    RemoteUserMiddleware will create Django session from the header.
+    Then redirect to the page that triggered login.
+    """
+    next_url = request.GET.get('next', '/')
+    return redirect(next_url)
+
+# urls.py
+from django.urls import path
+from . import views
+
+urlpatterns = [
+    path('sso-login/', views.sso_login, name='sso_login'),
+    # ... other URLs
+]
+```
+
+### 3. Use @login_required Normally
+
+```python
+from django.contrib.auth.decorators import login_required
+
+# Public view - anyone can access
+def homepage(request):
+    return render(request, 'home.html')
+
+# Protected view - triggers Keycloak login
+@login_required
+def dashboard(request):
+    # User is authenticated via Keycloak
+    return render(request, 'dashboard.html', {
+        'username': request.user.username,
+        'email': request.user.email,
+    })
+```
+
+---
+
+## Pattern B: Full nginx-Level Authentication
+
+For services where everything should be protected (e.g., DeepL translation service).
+
+### Django Configuration (Pattern B)
+
+```python
+# settings.py - Simpler than Pattern A
+
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.RemoteUserBackend',
+    'django.contrib.auth.backends.ModelBackend',
+]
+
+MIDDLEWARE = [
+    # ... same middleware as Pattern A
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.auth.middleware.RemoteUserMiddleware',
+    # ...
+]
+
+REMOTE_USER_HEADER = 'HTTP_X_REMOTE_USER'
+
+# No LOGIN_URL needed - nginx handles all authentication
+```
+
+**Key differences from Pattern A:**
+- No `LOGIN_URL = '/sso-login/'` (nginx authenticates everything)
+- No SSO login view needed
+- `@login_required` still works, but users are already authenticated
+- Simpler setup, but no public pages
+
+---
+
+## Common Configuration (Both Patterns)
+
+### Automatic User Creation & Email Handling
+
+**Yes, Django receives the user's email address!** Nginx passes both username and email:
+- `X-Remote-User` header → Keycloak username (e.g., `david.kleinhans`)
+- `X-Remote-Email` header → Keycloak email (e.g., `david.kleinhans@jade-hs.de`)
+
+**Automatic User Creation:**
+When a user logs in via Keycloak for the first time, Django's `RemoteUserBackend` **automatically creates** a Django User account:
+- `username` = value from `X-Remote-User` header
+- `email` = empty by default (see below to populate from header)
+- `is_staff` = False
+- `is_superuser` = False
+- No password is set (authentication is handled by Keycloak)
+
+### Custom Backend to Populate Email (Recommended for Both Patterns)
 
 # Header configuration - tells RemoteUserMiddleware which header to trust
 # This header is set by nginx from OAuth2-proxy's X-Auth-Request-User

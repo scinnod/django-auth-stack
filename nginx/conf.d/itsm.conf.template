@@ -1,25 +1,30 @@
 # =============================================================================
 # ITSM Service Virtual Host Configuration (Keycloak + OAuth2 Proxy)
 # =============================================================================
-# This configuration integrates Django's authentication system with Keycloak SSO.
+# AUTHENTICATION PATTERN: Django-Controlled (SSO Login Endpoint)
+#
+# This configuration allows Django to control which pages are public vs protected.
+# Django's @login_required decorator triggers Keycloak SSO only when needed.
 #
 # Domain: ${DOMAIN_ITSM} (e.g., itsm.jade.local)
 # Upstream: itsm_nginx:8000 (external Docker container on itsm_backend network)
 #
-# Authentication Pattern:
-#   - Django handles authorization with @login_required decorators
-#   - OAuth2-proxy handles Keycloak authentication at nginx level
-#   - Public paths bypass OAuth2-proxy (static, media, health)
-#   - All other paths get authenticated user headers from OAuth2-proxy
-#   - Django uses RemoteUserBackend to trust the X-Remote-User header
+# How it works:
+#   1. Public Django pages accessible without Keycloak login
+#   2. Pages with @login_required redirect to /sso-login/ (Django LOGIN_URL)
+#   3. nginx intercepts /sso-login/, validates via OAuth2-proxy → Keycloak
+#   4. After Keycloak login, nginx passes X-Remote-User header to Django
+#   5. Django RemoteUserMiddleware creates session from header
+#   6. Django redirects to originally requested page
+#   7. Subsequent requests use Django session cookie (no OAuth2-proxy involved)
 #
-# Flow:
-#   1. User accesses protected Django view (with @login_required)
-#   2. Nginx forwards to OAuth2-proxy for authentication
-#   3. OAuth2-proxy redirects to Keycloak if not authenticated
-#   4. After Keycloak login, OAuth2-proxy sets X-Remote-User header
-#   5. Django receives header, creates/updates session via RemoteUserBackend
-#   6. Django's @login_required decorator sees authenticated user
+# Django Configuration Required:
+#   - LOGIN_URL = '/sso-login/'
+#   - AUTHENTICATION_BACKENDS = ['django.contrib.auth.backends.RemoteUserBackend', ...]
+#   - MIDDLEWARE includes RemoteUserMiddleware
+#
+# Alternative Pattern: See deepl.conf.template for nginx-level authentication
+# (where ALL requests require Keycloak login, including static files)
 # =============================================================================
 
 server {
@@ -86,13 +91,13 @@ server {
     }
     
     # -------------------------------------------------------------------------
-    # ALL OTHER PATHS - Authentication via OAuth2-proxy, Authorization via Django
+    # SSO Login Endpoint - Keycloak Authentication Gateway
     # -------------------------------------------------------------------------
-    # nginx validates authentication, Django handles authorization (@login_required).
-    # Works with Django i18n_patterns (/de/*, /en/*, etc.) - language prefix is
-    # preserved in $request_uri for OAuth2-proxy redirects.
+    # Django LOGIN_URL should point here: LOGIN_URL = '/sso-login/'
+    # When @login_required triggers, user is redirected here for Keycloak auth.
+    # After successful auth, Django receives X-Remote-User header and creates session.
     
-    location / {
+    location /sso-login/ {
         auth_request /oauth2/auth;
         error_page 401 = /oauth2/start?rd=$scheme://$http_host$request_uri;
         
@@ -106,6 +111,25 @@ server {
         proxy_set_header X-Remote-User $user;
         proxy_set_header X-Remote-Email $email;
         
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        
+        proxy_pass http://itsm_nginx:8000;
+        proxy_buffering off;
+        proxy_http_version 1.1;
+    }
+    
+    # -------------------------------------------------------------------------
+    # ALL OTHER PATHS - Public by default, Django controls authorization
+    # -------------------------------------------------------------------------
+    # No authentication at nginx level. Django serves public pages normally.
+    # Django @login_required decorator redirects to /sso-login/ when needed.
+    # Works with Django i18n_patterns (/de/*, /en/*, etc.)
+    
+    location / {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

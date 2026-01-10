@@ -1,18 +1,107 @@
 # Django + Keycloak Quick Reference
 
-## Key Facts
+## Two Authentication Patterns
 
-✅ **Email is available!** Django receives both username and email from Keycloak via nginx headers:
+This stack provides **two scaffold configurations**:
+
+| Pattern | Use Case | nginx Config | Public Pages? |
+|---------|----------|--------------|---------------|
+| **A: Django-Controlled** | Public + protected pages | `itsm.conf.template` | ✅ Yes |
+| **B: Full nginx Auth** | Everything protected | `deepl.conf.template` | ❌ No |
+
+---
+
+## Pattern A: Django-Controlled (ITSM)
+
+✅ Django decides what's public vs protected  
+✅ `@login_required` triggers Keycloak  
+✅ Flexible for mixed public/private content  
+
+### Configuration
+
+```python
+# settings.py
+LOGIN_URL = '/sso-login/'  # IMPORTANT!
+
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.RemoteUserBackend',
+    'django.contrib.auth.backends.ModelBackend',
+]
+
+MIDDLEWARE = [
+    # ...
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.auth.middleware.RemoteUserMiddleware',
+    # ...
+]
+
+REMOTE_USER_HEADER = 'HTTP_X_REMOTE_USER'
+```
+
+```python
+# views.py
+from django.shortcuts import redirect
+
+def sso_login(request):
+    """SSO endpoint - nginx adds X-Remote-User here"""
+    return redirect(request.GET.get('next', '/'))
+
+# urls.py
+urlpatterns = [path('sso-login/', views.sso_login), ...]
+```
+
+### Usage
+
+```python
+# Public view - no login required
+def homepage(request):
+    return render(request, 'home.html')
+
+# Protected - triggers Keycloak login
+@login_required
+def dashboard(request):
+    return render(request, 'dashboard.html')
+```
+
+---
+
+## Pattern B: Full nginx Auth (DeepL)
+
+✅ Everything protected (including static files)  
+✅ Simpler Django setup  
+✅ Maximum security  
+
+### Configuration
+
+```python
+# settings.py (simpler - no LOGIN_URL or sso_login view!)
+
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.RemoteUserBackend',
+    'django.contrib.auth.backends.ModelBackend',
+]
+
+MIDDLEWARE = [
+    # ...
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.auth.middleware.RemoteUserMiddleware',
+    # ...
+]
+
+REMOTE_USER_HEADER = 'HTTP_X_REMOTE_USER'
+```
+
+---
+
+## Common: Email & Auto-Creation
+
+✅ **Email is available!** Both patterns receive:
 - `request.META['HTTP_X_REMOTE_USER']` → Keycloak username
 - `request.META['HTTP_X_REMOTE_EMAIL']` → Keycloak email
-- `request.user.username` → Automatically set from X-Remote-User
-- `request.user.email` → Set by custom backend (see below)
 
-✅ **Users are created automatically!** When someone logs in via Keycloak for the first time, Django's `RemoteUserBackend` automatically creates a User account. No manual user creation needed.
+✅ **Users created automatically!** First login creates Django User account
 
-✅ **No passwords in Django!** Authentication is handled by Keycloak. Django User objects have unusable passwords.
-
-## Minimal Configuration
+### Populate Email from Keycloak
 
 ### settings.py
 ```python

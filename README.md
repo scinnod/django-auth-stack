@@ -359,32 +359,59 @@ This allows you to manage Keycloak in version control instead of clicking!
 
 ## Django Integration
 
-This stack is designed to work with Django applications using the **standard RemoteUserBackend pattern**.
+This stack provides **two authentication patterns** as scaffold configurations:
 
-### How It Works
+### Pattern A: Django-Controlled Authentication (ITSM service)
 
-1. **Nginx** validates users are authenticated via OAuth2-proxy
-2. **OAuth2-proxy** handles Keycloak OIDC authentication
-3. **Nginx** passes `X-Remote-User` header to Django
-4. **Django** creates/manages sessions using `RemoteUserBackend`
-5. **Django's `@login_required`** decorators work normally!
+Django decides what's public vs protected. `@login_required` triggers Keycloak SSO.
 
-### Django Configuration (Minimal)
+**Use when:** You want public pages (marketing, blog, docs) + protected areas (dashboard, admin)
 
+**How it works:**
+1. Public Django pages accessible without Keycloak login
+2. `@login_required` redirects to `/sso-login/` endpoint
+3. nginx validates `/sso-login/` via OAuth2-proxy → Keycloak
+4. After login, Django receives `X-Remote-User` header, creates session
+5. Subsequent requests use Django session only
+
+**Configuration:** `nginx/conf.d/itsm.conf.template`
+
+### Pattern B: Full nginx-Level Authentication (DeepL service)
+
+nginx authenticates ALL requests (including static files). Everything protected.
+
+**Use when:** No public access needed. Internal tools, admin dashboards, confidential services.
+
+**How it works:**
+1. Every request validated by OAuth2-proxy (fast cookie check)
+2. Django receives authenticated headers for all requests
+3. Simpler setup, maximum security
+
+**Configuration:** `nginx/conf.d/deepl.conf.template`
+
+### Django Setup
+
+**Pattern A** requires:
 ```python
 # settings.py
-AUTHENTICATION_BACKENDS = [
-    'django.contrib.auth.backends.RemoteUserBackend',
-    'django.contrib.auth.backends.ModelBackend',
-]
+LOGIN_URL = '/sso-login/'
+AUTHENTICATION_BACKENDS = ['django.contrib.auth.backends.RemoteUserBackend', ...]
+MIDDLEWARE = [..., 'django.contrib.auth.middleware.RemoteUserMiddleware', ...]
+REMOTE_USER_HEADER = 'HTTP_X_REMOTE_USER'
 
-MIDDLEWARE = [
-    # ... other middleware ...
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.auth.middleware.RemoteUserMiddleware',  # Add this!
-    # ... other middleware ...
-]
+# views.py
+def sso_login(request):
+    return redirect(request.GET.get('next', '/'))
 
+# urls.py
+urlpatterns = [path('sso-login/', views.sso_login), ...]
+```
+
+**Pattern B** requires:
+```python
+# settings.py (simpler - no LOGIN_URL or sso_login view needed)
+AUTHENTICATION_BACKENDS = ['django.contrib.auth.backends.RemoteUserBackend', ...]
+MIDDLEWARE = [..., 'django.contrib.auth.middleware.RemoteUserMiddleware', ...]
 REMOTE_USER_HEADER = 'HTTP_X_REMOTE_USER'
 ```
 
