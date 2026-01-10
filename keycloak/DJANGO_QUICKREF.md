@@ -1,5 +1,17 @@
 # Django + Keycloak Quick Reference
 
+## Key Facts
+
+✅ **Email is available!** Django receives both username and email from Keycloak via nginx headers:
+- `request.META['HTTP_X_REMOTE_USER']` → Keycloak username
+- `request.META['HTTP_X_REMOTE_EMAIL']` → Keycloak email
+- `request.user.username` → Automatically set from X-Remote-User
+- `request.user.email` → Set by custom backend (see below)
+
+✅ **Users are created automatically!** When someone logs in via Keycloak for the first time, Django's `RemoteUserBackend` automatically creates a User account. No manual user creation needed.
+
+✅ **No passwords in Django!** Authentication is handled by Keycloak. Django User objects have unusable passwords.
+
 ## Minimal Configuration
 
 ### settings.py
@@ -109,7 +121,7 @@ def logout_view(request):
 
 ## Custom User Creation
 
-### Populate Email from Keycloak
+### Populate Email from Keycloak (Recommended)
 ```python
 # yourapp/backends.py
 from django.contrib.auth.backends import RemoteUserBackend
@@ -120,14 +132,39 @@ class CustomRemoteUserBackend(RemoteUserBackend):
         user.email = request.META.get('HTTP_X_REMOTE_EMAIL', '')
         user.save()
         return user
+    
+    def configure_user_on_login(self, request, user):
+        """Optional: Update email on every login (sync changes from Keycloak)."""
+        email = request.META.get('HTTP_X_REMOTE_EMAIL', '')
+        if email and user.email != email:
+            user.email = email
+            user.save()
+        return user
 ```
 
 ```python
 # settings.py
 AUTHENTICATION_BACKENDS = [
-    'yourapp.backends.CustomRemoteUserBackend',  # Use custom backend
+    'yourapp.backends.CustomRemoteUserBackend',  # Use custom backend with email
     'django.contrib.auth.backends.ModelBackend',
 ]
+```
+
+### Use Email as Username Instead
+```python
+# If you want users to login with email addresses instead of usernames
+class EmailRemoteUserBackend(RemoteUserBackend):
+    def authenticate(self, request, remote_user):
+        if not remote_user:
+            return None
+        # Use email as username
+        email = request.META.get('HTTP_X_REMOTE_EMAIL', remote_user)
+        return super().authenticate(request, remote_user=email)
+    
+    def configure_user(self, request, user):
+        user.email = request.META.get('HTTP_X_REMOTE_EMAIL', '')
+        user.save()
+        return user
 ```
 
 ## Testing

@@ -28,6 +28,25 @@ User → Nginx (TLS) → OAuth2-proxy → Keycloak (OIDC)
 
 ## Django Configuration
 
+### Automatic User Creation & Email Handling
+
+**Yes, Django receives the user's email address!** Nginx passes both username and email:
+- `X-Remote-User` header → Keycloak username (e.g., `david.kleinhans`)
+- `X-Remote-Email` header → Keycloak email (e.g., `david.kleinhans@jade-hs.de`)
+
+**Automatic User Creation:**
+When a user logs in via Keycloak for the first time, Django's `RemoteUserBackend` **automatically creates** a Django User account:
+- `username` = value from `X-Remote-User` header
+- `email` = empty by default (see below to populate from header)
+- `is_staff` = False
+- `is_superuser` = False
+- No password is set (authentication is handled by Keycloak)
+
+**To populate email automatically**, use a custom backend (see section 1 below).
+
+**Login with email vs username:**
+By default, Django uses the Keycloak **username** for authentication. If you want users to login with their **email** in Keycloak, configure Keycloak to use email as username, or use the email in the `X-Remote-User` header (see "Using Email as Username" section below).
+
 ### 1. Required Settings (`settings.py`)
 
 ```python
@@ -58,36 +77,53 @@ MIDDLEWARE = [
 REMOTE_USER_HEADER = 'HTTP_X_REMOTE_USER'
 
 # =============================================================================
-# OPTIONAL: Auto-create users from trusted header
+# RECOMMENDED: Custom backend to populate email from Keycloak
 # =============================================================================
-# If you want Django to automatically create user accounts when someone
-# authenticates via Keycloak for the first time, RemoteUserBackend already
-# does this by default. The user will be created with:
-#   - username = value from X-Remote-User header (Keycloak username)
-#   - is_staff = False
-#   - is_superuser = False
+# RemoteUserBackend automatically creates users, but doesn't populate the email
+# field by default. Use this custom backend to capture email from X-Remote-Email.
 
-# To customize auto-created users (e.g., set email from X-Remote-Email header):
+# Create this in yourapp/backends.py:
+from django.contrib.auth.backends import RemoteUserBackend
+
 class CustomRemoteUserBackend(RemoteUserBackend):
     """
-    Custom backend that populates email from X-Remote-Email header.
+    Custom backend that automatically populates user email from Keycloak.
+    Also demonstrates how to set additional fields.
     """
     def configure_user(self, request, user):
         """
-        Called when a user is created for the first time via remote auth.
+        Called ONLY when a user is created for the first time.
+        Subsequent logins will NOT trigger this method.
         """
-        # Get email from nginx header (set from OAuth2-proxy's X-Auth-Request-Email)
+        # Get email from nginx header (X-Remote-Email from Keycloak)
         email = request.META.get('HTTP_X_REMOTE_EMAIL', '')
         if email:
+            user.email = email
+        
+        # Optional: Set first_name, last_name from Keycloak claims
+        # (requires OAuth2-proxy to pass additional headers)
+        # user.first_name = request.META.get('HTTP_X_AUTH_REQUEST_GIVEN_NAME', '')
+        # user.last_name = request.META.get('HTTP_X_AUTH_REQUEST_FAMILY_NAME', '')
+        
+        user.save()
+        return user
+    
+    def configure_user_on_login(self, request, user):
+        """
+        OPTIONAL: Called on EVERY login to update user info.
+        Useful if you want to sync email changes from Keycloak.
+        """
+        email = request.META.get('HTTP_X_REMOTE_EMAIL', '')
+        if email and user.email != email:
             user.email = email
             user.save()
         return user
 
-# Then use in AUTHENTICATION_BACKENDS:
-# AUTHENTICATION_BACKENDS = [
-#     'yourapp.backends.CustomRemoteUserBackend',
-#     'django.contrib.auth.backends.ModelBackend',
-# ]
+# Then update AUTHENTICATION_BACKENDS in settings.py:
+AUTHENTICATION_BACKENDS = [
+    'yourapp.backends.CustomRemoteUserBackend',  # Use custom backend with email
+    'django.contrib.auth.backends.ModelBackend',
+]
 ```
 
 ### 2. Understanding `@login_required` Behavior
@@ -157,9 +193,8 @@ urlpatterns = i18n_patterns(
 6. Django receives request with both X-Remote-User header and correct language
 
 **No special configuration needed** - the nginx `location /` block matches all paths including language-prefixed ones. The `$request_uri` variable in the redirect preserves the full path including language prefix.
-```
 
-### 3. Logout Handling
+### 5. Logout Handling
 
 ```python
 from django.contrib.auth import logout
@@ -183,7 +218,7 @@ def logout_view(request):
     return redirect('/oauth2/sign_out?rd=/')
 ```
 
-### 5. Custom User Model (Optional)
+### 6. Custom User Model (Optional)
 
 If you use a custom user model, ensure it's compatible with RemoteUserBackend:
 

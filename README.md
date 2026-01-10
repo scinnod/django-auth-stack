@@ -23,7 +23,6 @@ Production-ready authentication gateway combining nginx reverse proxy with Keycl
 8. [Django Integration](#django-integration)
 9. [Production Readiness](#production-readiness)
 10. [Troubleshooting](#troubleshooting)
-11. [Migration from Authentik](#migration-from-authentik)
 
 ---
 
@@ -537,61 +536,6 @@ curl -k https://auth.jade.local/oauth2/ping
 curl -k -v https://itsm.jade.local/oauth2/auth
 # Should return 401 (unauthorized) with redirect header
 ```
-
----
-
-## Migration from Authentik
-
-If you previously used Authentik:
-
-### Automated Migration
-
-```bash
-./scripts/migrate-to-keycloak.sh
-```
-
-This script:
-- Backs up your `.env` file
-- Generates new secrets
-- Updates database configuration
-- Provides step-by-step instructions
-
-### Manual Migration Steps
-
-1. **Backup data** (if needed):
-   ```bash
-   # Export Authentik data if you have important configuration
-   sudo docker compose exec authentik-server ak export > authentik-backup.json
-   ```
-
-2. **Stop Authentik stack**:
-   ```bash
-   sudo docker compose down -v
-   ```
-
-3. **Update configuration** (already done if using migration script)
-
-4. **Start Keycloak stack**:
-   ```bash
-   sudo docker compose up -d
-   ```
-
-5. **Remove old Authentik volumes** (after verifying Keycloak works):
-   ```bash
-   sudo docker volume rm 0_nginx_authentik_authentik_media
-   sudo docker volume rm 0_nginx_authentik_authentik_templates
-   sudo docker volume rm 0_nginx_authentik_redis_data
-   ```
-
-### Key Differences
-
-| Feature | Authentik | Keycloak |
-|---------|-----------|----------|
-| Config | Web UI only | Web UI + JSON export/import |
-| Auth Method | Built-in forward auth | OAuth2 Proxy middleware |
-| SAML Support | Limited | Full SAML 2.0 IdP/SP |
-| Headers | `X-authentik-*` | `X-Auth-Request-*` |
-| Admin Path | `/if/admin/` | `/admin/` |
 
 ---
 
