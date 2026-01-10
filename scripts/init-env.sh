@@ -95,8 +95,11 @@ log_step "Generating secure random values..."
 POSTGRES_PASSWORD=$(generate_password)
 log_info "Generated POSTGRES_PASSWORD (32 chars)"
 
-AUTHENTIK_SECRET_KEY=$(generate_secret_key)
-log_info "Generated AUTHENTIK_SECRET_KEY (60 chars base64)"
+KEYCLOAK_ADMIN_PASSWORD=$(generate_password)
+log_info "Generated KEYCLOAK_ADMIN_PASSWORD (32 chars)"
+
+OAUTH2_COOKIE_SECRET=$(openssl rand -base64 32 | head -c 32)
+log_info "Generated OAUTH2_PROXY_COOKIE_SECRET (32 chars)"
 
 # Replace placeholders in .env file
 log_step "Replacing placeholders in .env..."
@@ -116,10 +119,16 @@ if grep -q "POSTGRES_PASSWORD=CHANGE_ME_STRONG_PASSWORD_HERE" .env; then
     log_info "Set POSTGRES_PASSWORD"
 fi
 
-# Replace AUTHENTIK_SECRET_KEY placeholder
-if grep -q "AUTHENTIK_SECRET_KEY=CHANGE_ME_GENERATE_WITH_OPENSSL_RAND" .env; then
-    $SED_INPLACE "s|AUTHENTIK_SECRET_KEY=CHANGE_ME_GENERATE_WITH_OPENSSL_RAND|AUTHENTIK_SECRET_KEY=${AUTHENTIK_SECRET_KEY}|g" .env
-    log_info "Set AUTHENTIK_SECRET_KEY"
+# Replace KEYCLOAK_ADMIN_PASSWORD placeholder
+if grep -q "KEYCLOAK_ADMIN_PASSWORD=CHANGE_ME_ADMIN_PASSWORD" .env; then
+    $SED_INPLACE "s|KEYCLOAK_ADMIN_PASSWORD=CHANGE_ME_ADMIN_PASSWORD|KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD}|g" .env
+    log_info "Set KEYCLOAK_ADMIN_PASSWORD"
+fi
+
+# Replace OAUTH2_PROXY_COOKIE_SECRET placeholder
+if grep -q "OAUTH2_PROXY_COOKIE_SECRET=REPLACE_WITH_32_CHAR_RANDOM_STRING" .env; then
+    $SED_INPLACE "s|OAUTH2_PROXY_COOKIE_SECRET=REPLACE_WITH_32_CHAR_RANDOM_STRING|OAUTH2_PROXY_COOKIE_SECRET=${OAUTH2_COOKIE_SECRET}|g" .env
+    log_info "Set OAUTH2_PROXY_COOKIE_SECRET"
 fi
 
 # =============================================================================
@@ -139,51 +148,38 @@ fi
 
 # Domain configuration
 echo ""
-log_info "Domain Configuration (update these in .env manually if needed):"
-read -p "ITSM domain [itsm.example.org]: " domain_itsm
-read -p "DeepL domain [deepl.example.org]: " domain_deepl
-read -p "Auth domain [auth.example.org]: " domain_auth
+log_info "Domain Configuration:"
+log_warn "For development: use .local domains (e.g., .example.local)"
+log_warn "For production: use actual domains (e.g., .example.com)"
+echo ""
+read -p "Auth domain [auth.example.local]: " domain_auth
+read -p "ITSM domain [itsm.example.local]: " domain_itsm
+read -p "DeepL/Translation domain [translation.example.local]: " domain_deepl
+
+if [ -n "$domain_auth" ]; then
+    $SED_INPLACE "s|DOMAIN_AUTH=auth.example.local|DOMAIN_AUTH=${domain_auth}|g" .env
+    log_info "Set DOMAIN_AUTH to ${domain_auth}"
+    
+    # Extract base domain for cookie (e.g., auth.example.local -> .example.local)
+    cookie_domain=".${domain_auth#*.}"
+    echo ""
+    read -p "Cookie domain for SSO [${cookie_domain}]: " input_cookie_domain
+    cookie_domain=${input_cookie_domain:-$cookie_domain}
+    $SED_INPLACE "s|OAUTH2_PROXY_COOKIE_DOMAIN=.example.local|OAUTH2_PROXY_COOKIE_DOMAIN=${cookie_domain}|g" .env
+    log_info "Set OAUTH2_PROXY_COOKIE_DOMAIN to ${cookie_domain}"
+fi
 
 if [ -n "$domain_itsm" ]; then
-    $SED_INPLACE "s|DOMAIN_ITSM=itsm.example.org|DOMAIN_ITSM=${domain_itsm}|g" .env
+    $SED_INPLACE "s|DOMAIN_ITSM=itsm.example.local|DOMAIN_ITSM=${domain_itsm}|g" .env
+    log_info "Set DOMAIN_ITSM to ${domain_itsm}"
 fi
 
 if [ -n "$domain_deepl" ]; then
-    $SED_INPLACE "s|DOMAIN_DEEPL=deepl.example.org|DOMAIN_DEEPL=${domain_deepl}|g" .env
+    $SED_INPLACE "s|DOMAIN_DEEPL=translation.example.local|DOMAIN_DEEPL=${domain_deepl}|g" .env
+    log_info "Set DOMAIN_DEEPL to ${domain_deepl}"
 fi
 
-if [ -n "$domain_auth" ]; then
-    $SED_INPLACE "s|DOMAIN_AUTH=auth.example.org|DOMAIN_AUTH=${domain_auth}|g" .env
-    # Also update AUTHENTIK_HOST to match
-    $SED_INPLACE "s|AUTHENTIK_HOST=https://auth.example.org|AUTHENTIK_HOST=https://${domain_auth}|g" .env
-    $SED_INPLACE "s|AUTHENTIK_HOST_BROWSER=https://auth.example.org|AUTHENTIK_HOST_BROWSER=https://${domain_auth}|g" .env
-fi
 
-# SMTP configuration
-echo ""
-read -p "Configure SMTP/email settings now? (y/N): " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    read -p "SMTP Host: " smtp_host
-    read -p "SMTP Port [587]: " smtp_port
-    smtp_port=${smtp_port:-587}
-    read -p "SMTP Username: " smtp_user
-    read -s -p "SMTP Password: " smtp_password
-    echo
-    read -p "SMTP From Address: " smtp_from
-    read -p "Use TLS? (true/false) [true]: " smtp_tls
-    smtp_tls=${smtp_tls:-true}
-    
-    if [ -n "$smtp_host" ]; then
-        $SED_INPLACE "s|AUTHENTIK_EMAIL_HOST=|AUTHENTIK_EMAIL_HOST=${smtp_host}|g" .env
-        $SED_INPLACE "s|AUTHENTIK_EMAIL_PORT=587|AUTHENTIK_EMAIL_PORT=${smtp_port}|g" .env
-        $SED_INPLACE "s|AUTHENTIK_EMAIL_USERNAME=|AUTHENTIK_EMAIL_USERNAME=${smtp_user}|g" .env
-        $SED_INPLACE "s|AUTHENTIK_EMAIL_PASSWORD=|AUTHENTIK_EMAIL_PASSWORD=${smtp_password}|g" .env
-        $SED_INPLACE "s|AUTHENTIK_EMAIL_FROM=|AUTHENTIK_EMAIL_FROM=${smtp_from}|g" .env
-        $SED_INPLACE "s|AUTHENTIK_EMAIL_USE_TLS=true|AUTHENTIK_EMAIL_USE_TLS=${smtp_tls}|g" .env
-        log_info "SMTP configuration saved"
-    fi
-fi
 
 # =============================================================================
 # Completion
@@ -197,19 +193,47 @@ echo ""
 log_info "Created: .env"
 log_info "Generated secure random values for:"
 log_info "  - POSTGRES_PASSWORD"
-log_info "  - AUTHENTIK_SECRET_KEY"
+log_info "  - KEYCLOAK_ADMIN_PASSWORD"
+log_info "  - OAUTH2_PROXY_COOKIE_SECRET"
 echo ""
-log_warn "IMPORTANT: Review .env file and update any remaining placeholders"
-log_warn "Keep .env file secure - it contains sensitive credentials!"
+log_warn "IMPORTANT: Keep .env file secure - it contains sensitive credentials!"
 echo ""
-log_info "Next steps:"
-log_info "  1. Review .env file: nano .env"
-log_info "  2. Update domain names if needed (replace example.org)"
-log_info "  3. Configure SMTP settings (if not done above)"
-log_info "  4. Create external networks:"
-log_info "       docker network create itsm_backend"
-log_info "       docker network create deepl_backend"
-log_info "  5. Choose TLS mode and start stack (see README.md)"
+log_info "========================================"
+log_info "Next Steps - REQUIRED:"
+log_info "========================================"
+echo ""
+log_info "1. Review and verify .env file:"
+log_info "     nano .env"
+echo ""
+log_info "2. Create Docker networks:"
+log_info "     docker network create itsm_backend"
+log_info "     docker network create deepl_backend"
+echo ""
+log_info "3. Start the stack and access Keycloak:"
+log_info "     docker compose up -d"
+log_info "     Access: https://${domain_auth:-auth.example.local}"
+log_info "     Username: admin"
+log_info "     Password: <check .env file for KEYCLOAK_ADMIN_PASSWORD>"
+echo ""
+log_warn "========================================"
+log_warn "MANUAL CONFIGURATION REQUIRED:"
+log_warn "========================================"
+echo ""
+log_warn "After Keycloak is running, you MUST:"
+echo ""
+log_warn "1. Login to Keycloak admin console"
+log_warn "2. Create or import the realm (e.g., 'jade')"
+log_warn "3. Create an OIDC client named 'oauth2-proxy' with:"
+log_warn "     - Client ID: oauth2-proxy"
+log_warn "     - Access Type: confidential"
+log_warn "     - Valid Redirect URIs: https://*/oauth2/callback"
+log_warn "4. Get the client secret from: Clients → oauth2-proxy → Credentials"
+log_warn "5. Update .env file with the client secret:"
+log_warn "     OAUTH2_PROXY_CLIENT_SECRET=<secret-from-keycloak>"
+log_warn "6. Restart the stack:"
+log_warn "     docker compose restart oauth2-proxy"
+echo ""
+log_info "For detailed instructions, see: README.md"
 echo ""
 
 exit 0
