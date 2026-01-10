@@ -12,7 +12,7 @@ set -e
 # List of template files and their destinations
 # Templates use ${VARIABLE_NAME} syntax
 TEMPLATE_FILES="
-/etc/nginx/conf.d/authentik.conf.template:/etc/nginx/conf.d/authentik.conf
+/etc/nginx/conf.d/keycloak.conf.template:/etc/nginx/conf.d/keycloak.conf
 /etc/nginx/conf.d/itsm.conf.template:/etc/nginx/conf.d/itsm.conf
 /etc/nginx/conf.d/deepl.conf.template:/etc/nginx/conf.d/deepl.conf
 "

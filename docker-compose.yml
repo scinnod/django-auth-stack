@@ -1,17 +1,18 @@
 # =============================================================================
-# Edge-Auth Stack: nginx reverse proxy + Authentik SSO
+# Edge-Auth Stack: nginx reverse proxy + Keycloak SSO
 # =============================================================================
 # This compose file defines the authentication gateway stack:
 #   - nginx: public-facing reverse proxy (ports 80/443)
-#   - authentik-server & authentik-worker: SSO/authentication
-#   - postgres & redis: Authentik dependencies
+#   - keycloak: SSO/authentication server (OIDC & SAML support)
+#   - oauth2-proxy: Forward auth middleware for nginx
+#   - postgres: Keycloak database
 #
 # NETWORKS (defense-in-depth segmentation):
 #   - proxy: public-facing, nginx only (auto-created)
-#   - auth_backend (internal): nginx <-> authentik-server
+#   - auth_backend (internal): nginx <-> oauth2-proxy <-> keycloak
 #   - itsm_backend (external): nginx <-> itsm_nginx container
 #   - deepl_backend (external): nginx <-> deepl_nginx container
-#   - authentik_db (internal): authentik services <-> postgres/redis
+#   - keycloak_db (internal): keycloak <-> postgres
 #
 # EXTERNAL NETWORKS must be created manually before starting:
 #   docker network create itsm_backend
@@ -31,22 +32,22 @@ version: '3.8'
 
 services:
   # ===========================================================================
-  # PostgreSQL - Authentik database
+  # PostgreSQL - Keycloak database
   # ===========================================================================
   postgres:
     image: postgres:16-alpine
     container_name: edge_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-authentik}
-      POSTGRES_USER: ${POSTGRES_USER:-authentik}
+      POSTGRES_DB: ${POSTGRES_DB:-keycloak}
+      POSTGRES_USER: ${POSTGRES_USER:-keycloak}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
-      - authentik_db
+      - keycloak_db
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-authentik}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-keycloak}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -54,117 +55,100 @@ services:
       - no-new-privileges:true
 
   # ===========================================================================
-  # Redis - Authentik cache & message broker
+  # Keycloak - SSO/authentication server (OIDC & SAML)
   # ===========================================================================
-  redis:
-    image: redis:7-alpine
-    container_name: edge_redis
+  keycloak:
+    image: quay.io/keycloak/keycloak:${KEYCLOAK_VERSION:-23.0}
+    container_name: edge_keycloak
     restart: unless-stopped
-    command: --save 60 1 --loglevel warning
-    volumes:
-      - redis_data:/data
-    networks:
-      - authentik_db
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    security_opt:
-      - no-new-privileges:true
-
-  # ===========================================================================
-  # Authentik Server - SSO/authentication server
-  # ===========================================================================
-  authentik-server:
-    image: ghcr.io/goauthentik/server:${AUTHENTIK_VERSION:-2024.10.1}
-    container_name: edge_authentik_server
-    restart: unless-stopped
-    command: server
+    command: start
     environment:
-      # Core configuration
-      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:?AUTHENTIK_SECRET_KEY must be set}
-      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      # Database (PostgreSQL recommended by Keycloak for production)
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-keycloak}
+      KC_DB_USERNAME: ${POSTGRES_USER:-keycloak}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       
-      # Database
-      AUTHENTIK_POSTGRESQL__HOST: postgres
-      AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_DB:-authentik}
-      AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_USER:-authentik}
-      AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      # Admin user (initial setup only)
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD must be set}
       
-      # Redis
-      AUTHENTIK_REDIS__HOST: redis
+      # Hostname configuration (required for production)
+      KC_HOSTNAME: ${DOMAIN_AUTH:-auth.example.org}
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
       
-      # Web server
-      AUTHENTIK_LISTEN__HTTP: 0.0.0.0:9000
-      AUTHENTIK_LISTEN__HTTPS: 0.0.0.0:9443
+      # Proxy configuration (Keycloak is behind nginx reverse proxy)
+      KC_PROXY: edge
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_PORT: "8080"
       
-      # Outpost configuration - critical for nginx integration
-      # The outpost will be accessible at https://auth.example.org
-      AUTHENTIK_HOST: ${AUTHENTIK_HOST:-https://auth.example.org}
-      AUTHENTIK_HOST_BROWSER: ${AUTHENTIK_HOST_BROWSER:-https://auth.example.org}
-      AUTHENTIK_COOKIE_DOMAIN: ${AUTHENTIK_COOKIE_DOMAIN:-.example.org}
+      # Security: Disable development features in production
+      KC_FEATURES: "token-exchange,admin-fine-grained-authz"
       
-      # Email (optional - configure for production)
-      AUTHENTIK_EMAIL__HOST: ${AUTHENTIK_EMAIL_HOST:-}
-      AUTHENTIK_EMAIL__PORT: ${AUTHENTIK_EMAIL_PORT:-587}
-      AUTHENTIK_EMAIL__USERNAME: ${AUTHENTIK_EMAIL_USERNAME:-}
-      AUTHENTIK_EMAIL__PASSWORD: ${AUTHENTIK_EMAIL_PASSWORD:-}
-      AUTHENTIK_EMAIL__USE_TLS: ${AUTHENTIK_EMAIL_USE_TLS:-false}
-      AUTHENTIK_EMAIL__FROM: ${AUTHENTIK_EMAIL_FROM:-}
+      # Performance & Production settings
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      KC_LOG_LEVEL: ${KEYCLOAK_LOG_LEVEL:-info}
+      
+      # Transaction settings (recommended for PostgreSQL)
+      KC_TRANSACTION_XA_ENABLED: "false"
     volumes:
-      - authentik_media:/media
-      - authentik_templates:/templates
+      # Realm configuration (optional - for config-as-code)
+      - ./keycloak/realms:/opt/keycloak/data/import:ro
     networks:
       - auth_backend
-      - authentik_db
+      - keycloak_db
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '200 OK'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
     security_opt:
       - no-new-privileges:true
 
   # ===========================================================================
-  # Authentik Worker - Background task processor
+  # OAuth2 Proxy - Forward auth middleware for nginx
   # ===========================================================================
-  authentik-worker:
-    image: ghcr.io/goauthentik/server:${AUTHENTIK_VERSION:-2024.10.1}
-    container_name: edge_authentik_worker
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:${OAUTH2_PROXY_VERSION:-v7.6.0}
+    container_name: edge_oauth2_proxy
     restart: unless-stopped
-    command: worker
+    command:
+      - --http-address=0.0.0.0:4180
+      - --upstream=static://202
+      - --email-domain=*
+      - --cookie-secure=true
+      - --cookie-domain=${OAUTH2_PROXY_COOKIE_DOMAIN:-.example.org}
+      - --whitelist-domain=${OAUTH2_PROXY_COOKIE_DOMAIN:-.example.org}
+      - --provider=oidc
+      - --provider-display-name=Keycloak
+      - --oidc-issuer-url=https://${DOMAIN_AUTH:-auth.example.org}/realms/${KEYCLOAK_REALM:-master}
+      - --redirect-url=https://${DOMAIN_AUTH:-auth.example.org}/oauth2/callback
+      - --reverse-proxy=true
+      - --set-xauthrequest=true
+      - --pass-access-token=true
+      - --pass-authorization-header=true
+      - --set-authorization-header=true
+      - --skip-provider-button=true
     environment:
-      # Must match authentik-server settings
-      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:?AUTHENTIK_SECRET_KEY must be set}
-      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
-      
-      AUTHENTIK_POSTGRESQL__HOST: postgres
-      AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_DB:-authentik}
-      AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_USER:-authentik}
-      AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
-      
-      AUTHENTIK_REDIS__HOST: redis
-      
-      # Email (must match server if configured)
-      AUTHENTIK_EMAIL__HOST: ${AUTHENTIK_EMAIL_HOST:-}
-      AUTHENTIK_EMAIL__PORT: ${AUTHENTIK_EMAIL_PORT:-587}
-      AUTHENTIK_EMAIL__USERNAME: ${AUTHENTIK_EMAIL_USERNAME:-}
-      AUTHENTIK_EMAIL__PASSWORD: ${AUTHENTIK_EMAIL_PASSWORD:-}
-      AUTHENTIK_EMAIL__USE_TLS: ${AUTHENTIK_EMAIL_USE_TLS:-false}
-      AUTHENTIK_EMAIL__FROM: ${AUTHENTIK_EMAIL_FROM:-}
-    volumes:
-      - authentik_media:/media
-      - authentik_templates:/templates
+      OAUTH2_PROXY_CLIENT_ID: ${OAUTH2_PROXY_CLIENT_ID:?OAUTH2_PROXY_CLIENT_ID must be set}
+      OAUTH2_PROXY_CLIENT_SECRET: ${OAUTH2_PROXY_CLIENT_SECRET:?OAUTH2_PROXY_CLIENT_SECRET must be set}
+      OAUTH2_PROXY_COOKIE_SECRET: ${OAUTH2_PROXY_COOKIE_SECRET:?OAUTH2_PROXY_COOKIE_SECRET must be set}
     networks:
-      - authentik_db
+      - auth_backend
     depends_on:
-      postgres:
+      keycloak:
         condition: service_healthy
-      redis:
-        condition: service_healthy
-      authentik-server:
-        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4180/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     security_opt:
       - no-new-privileges:true
 
@@ -211,11 +195,12 @@ services:
       - nginx_logs:/var/log/nginx
     networks:
       - proxy           # Public-facing
-      - auth_backend    # -> authentik-server
+      - auth_backend    # -> oauth2-proxy & keycloak
       - itsm_backend    # -> itsm_nginx:8000
       - deepl_backend   # -> deepl_nginx:8000
     depends_on:
-      - authentik-server
+      - oauth2-proxy
+      - keycloak
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/health"]
       interval: 30s
@@ -232,7 +217,7 @@ networks:
   proxy:
     driver: bridge
   
-  # Internal: nginx <-> authentik-server
+  # Internal: nginx <-> oauth2-proxy <-> keycloak
   auth_backend:
     internal: true
     driver: bridge
@@ -245,8 +230,8 @@ networks:
   deepl_backend:
     external: true
   
-  # Internal: authentik services <-> postgres/redis
-  authentik_db:
+  # Internal: keycloak <-> postgres
+  keycloak_db:
     internal: true
     driver: bridge
 
@@ -255,12 +240,6 @@ networks:
 # =============================================================================
 volumes:
   postgres_data:
-    driver: local
-  redis_data:
-    driver: local
-  authentik_media:
-    driver: local
-  authentik_templates:
     driver: local
   nginx_logs:
     driver: local

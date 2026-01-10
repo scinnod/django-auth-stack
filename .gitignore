@@ -1,44 +1,97 @@
-# Add .env to .gitignore to prevent committing secrets
+# =============================================================================
+# Sensitive Configuration Files
+# =============================================================================
+# Environment files with secrets
 .env
+.env.local
+.env.*.local
 
-# Generated nginx configs (created from templates at runtime)
+# Backup env files
+.env.backup
+.env.*.backup
+
+# =============================================================================
+# Generated nginx Configurations
+# =============================================================================
+# Generated from templates at runtime (contain domain names)
 nginx/conf.d/*.conf
 !nginx/conf.d/*.conf.template
 
-# Ignore certificate files (sensitive)
+# =============================================================================
+# TLS/SSL Certificates
+# =============================================================================
+# Certificate files (sensitive private keys)
 certs/*.pem
+certs/*.key
+certs/*.crt
 certs/live/
 certs/archive/
 certs/renewal/
 
-# Ignore DH parameters
+# DH parameters (can be regenerated)
 nginx/dhparam.pem
 
-# Docker volumes (managed by Docker)
+# =============================================================================
+# Keycloak Data
+# =============================================================================
+# Realm exports may contain sensitive data (client secrets, user hashes)
+keycloak/realms/*.json
+!keycloak/realms/README.md
+
+# Keycloak themes (if customized)
+keycloak/themes/
+
+# =============================================================================
+# Docker Volumes
+# =============================================================================
+# Managed by Docker, contain runtime data
 postgres_data/
-redis_data/
-authentik_media/
-authentik_templates/
 nginx_logs/
 certbot_certs/
 certbot_webroot/
 certbot_logs/
 
-# Backup files
+# Old Authentik volumes (if any remain)
+redis_data/
+authentik_media/
+authentik_templates/
+
+# =============================================================================
+# Backup Files
+# =============================================================================
 *.sql
 *.sql.gz
+*.dump
 backup_*/
+*.backup
 
-# OS files
+# =============================================================================
+# OS Files
+# =============================================================================
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# Editor files
+# =============================================================================
+# Editor Files
+# =============================================================================
 *.swp
 *.swo
 *~
 .vscode/
 .idea/
+*.sublime-project
+*.sublime-workspace
 
+# =============================================================================
 # Logs
+# =============================================================================
 *.log
+logs/
+
+# =============================================================================
+# Temporary Files
+# =============================================================================
+tmp/
+temp/
+*.tmp

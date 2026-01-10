@@ -1,713 +1,493 @@
-# Edge-Auth Stack: nginx + Authentik SSO
+# Edge-Auth Stack: nginx + Keycloak SSO
 
-Production-ready reverse proxy and authentication gateway combining nginx with Authentik SSO, featuring network segmentation, TLS termination, and forward-auth integration.
+Production-ready authentication gateway combining nginx reverse proxy with Keycloak SSO for Django services.
 
-## 📋 Overview
+## 🎯 Features
 
-This stack provides:
-- **nginx** - Alpine-based reverse proxy (public entrypoint, ports 80/443)
-- **Authentik** - Modern SSO/authentication platform (server + worker)
-- **PostgreSQL** - Authentik database (Alpine-based)
-- **Redis** - Authentik cache/message broker (Alpine-based)
+- **Keycloak SSO** - Industry-standard OIDC & SAML authentication
+- **OAuth2 Proxy** - Seamless forward auth integration with nginx  
+- **Config-as-Code** - Manage Keycloak via JSON realm exports (no clicking!)
+- **Network Segmentation** - Defense-in-depth with isolated Docker networks
+- **Dual TLS Mode** - Provided certificates or Let's Encrypt
+- **SAML Support** - Full SAML 2.0 IdP capabilities for Shibboleth integration
 
-### Virtual Hosts
+## 📋 Table of Contents
 
-| Domain | Access Policy | Upstream |
-|--------|---------------|----------|
-| `auth.example.org` | Public (login portal) | `authentik-server:9000` |
-| `itsm.example.org` | Mixed (public + auth on `/admin/`, `/restricted/`, `/api/private/`) | `itsm_nginx:8000` |
-| `deepl.example.org` | Fully authenticated | `deepl_nginx:8000` |
+1. [Architecture](#architecture)
+2. [Quick Start](#quick-start)
+3. [Initial Setup](#initial-setup)
+4. [Keycloak Configuration](#keycloak-configuration)
+5. [Domain Selection](#domain-selection)
+6. [TLS Certificate Modes](#tls-certificate-modes)
+7. [Network Architecture](#network-architecture)
+8. [Troubleshooting](#troubleshooting)
+9. [Migration from Authentik](#migration-from-authentik)
 
-### Network Architecture (Defense in Depth)
+---
+
+## Architecture
 
 ```
 Internet
-    |
-    v
-[nginx] (ports 80/443)
-    |
-    +---> proxy (auto-created) ------> Public-facing
-    |
-    +---> auth_backend (internal) ---> authentik-server
-    |
-    +---> itsm_backend (external) ---> itsm_nginx:8000
-    |
-    +---> deepl_backend (external) --> deepl_nginx:8000
-    
-[authentik-server/worker]
-    |
-    +---> authentik_db (internal) ----> postgres, redis
+   ↓
+nginx (TLS termination, reverse proxy)
+   ↓
+   ├─→ Public paths (no auth) → Upstream Apps
+   ↓
+   ├─→ Protected paths → OAuth2 Proxy → Keycloak → Upstream Apps
+   ↓
+   └─→ auth.jade.local → Keycloak Admin Console
 ```
 
-## 🚀 Quick Start
+### Components
+
+- **nginx**: Public-facing reverse proxy (ports 80/443)
+- **Keycloak**: SSO server providing OIDC & SAML
+- **OAuth2 Proxy**: Forward authentication middleware
+- **PostgreSQL**: Keycloak database
+- **Upstream Apps**: Your Django services (ITSM, Translation)
+
+---
+
+## Quick Start
 
 ### 1. Create External Networks
-
-The backend networks are shared with upstream application containers and must be created manually:
 
 ```bash
 docker network create itsm_backend
 docker network create deepl_backend
 ```
 
-Note: The `proxy` network is automatically created by Docker Compose.
-
 ### 2. Configure Environment
 
-Use the initialization script to create `.env` with secure random values:
+Run the migration script to generate secrets and update `.env`:
 
 ```bash
-chmod +x scripts/init-env.sh
-./scripts/init-env.sh
+./scripts/migrate-to-keycloak.sh
 ```
 
-This script will:
-- Copy `.env.example` to `.env`
-- Generate secure random passwords for `POSTGRES_PASSWORD` and `AUTHENTIK_SECRET_KEY`
-- Optionally prompt for domain names and SMTP configuration
+Or manually edit `.env` file (see `.env.keycloak` template).
 
-Alternatively, configure manually:
-```bash
-cp .env.example .env
-nano .env
-# Generate: AUTHENTIK_SECRET_KEY=$(openssl rand -base64 60)
-```
-
-### 3. Choose TLS Mode
-
-#### Option A: Provided Certificates (Default)
-
-**A1. Using Self-Signed Certificates** (development/testing only)
+### 3. Start Services
 
 ```bash
-# Generate self-signed certificates automatically
-chmod +x scripts/init-selfsigned.sh
-./scripts/init-selfsigned.sh
+# Stop any existing services
+sudo docker compose down -v
 
-# Start stack
-docker compose up -d
+# Start Keycloak stack
+sudo docker compose up -d
+
+# Check status
+sudo docker compose ps
 ```
 
-**WARNING:** Self-signed certificates show browser warnings. Not for production!
+### 4. Initial Keycloak Setup
 
-**A2. Using Real Certificates** (production)
+1. Access Keycloak admin console: `https://auth.jade.local`
+2. Log in with admin credentials from `.env`
+3. Follow [Keycloak Configuration](#keycloak-configuration) section
+
+---
+
+## Initial Setup
+
+### Prerequisites
+
+- Docker & Docker Compose
+- Domain names configured in `/etc/hosts` or DNS:
+  ```
+  127.0.0.1 auth.jade.local itsm.jade.local translation.jade.local
+  ```
+
+### Environment Variables
+
+Critical variables in `.env`:
 
 ```bash
-# Create certificate directory and place your certificates
-mkdir -p certs
-# Copy your certificates:
-# certs/fullchain.pem - Full certificate chain
-# certs/privkey.pem - Private key
+# Database
+POSTGRES_PASSWORD=<strong-random-password>
 
-# Generate DH parameters (recommended)
-openssl dhparam -out nginx/dhparam.pem 2048
+# Keycloak Admin
+KEYCLOAK_ADMIN=admin
+KEYCLOAK_ADMIN_PASSWORD=<strong-random-password>
 
-# Start stack
-docker compose up -d
+# OAuth2 Proxy Secrets
+OAUTH2_PROXY_CLIENT_ID=oauth2-proxy
+OAUTH2_PROXY_CLIENT_SECRET=<from-keycloak-after-setup>
+OAUTH2_PROXY_COOKIE_SECRET=<32-char-random-string>
+
+# Domains
+DOMAIN_AUTH=auth.jade.local
+DOMAIN_ITSM=itsm.jade.local
+DOMAIN_DEEPL=translation.jade.local
+KEYCLOAK_REALM=jade
 ```
 
-#### Option B: Let's Encrypt (Automated)
-
-1. Ensure your domains are configured in `.env`:
+**Generate secrets:**
 ```bash
-# The init-letsencrypt.sh script automatically reads these:
-DOMAIN_AUTH=auth.yourdomain.com
-DOMAIN_ITSM=itsm.yourdomain.com
-DOMAIN_DEEPL=deepl.yourdomain.com
-LETSENCRYPT_EMAIL=admin@yourdomain.com
+# Cookie secret (32 characters)
+openssl rand -base64 32 | head -c 32
+
+# Admin password
+openssl rand -base64 20
 ```
 
-2. Ensure DNS records point to your server
+---
 
-3. Run initialization script:
+## Keycloak Configuration
+
+### Step 1: Create a Realm
+
+1. Access Keycloak admin: `https://auth.jade.local`
+2. Click dropdown in top-left (says "Master") → **Create Realm**
+3. Name: `jade` (must match `KEYCLOAK_REALM` in `.env`)
+4. Click **Create**
+
+### Step 2: Create an OIDC Client for OAuth2 Proxy
+
+1. Go to **Clients** → **Create client**
+2. **General Settings**:
+   - Client type: `OpenID Connect`
+   - Client ID: `oauth2-proxy` (must match `.env`)
+   - Click **Next**
+
+3. **Capability config**:
+   - Client authentication: `ON`
+   - Authorization: `OFF`
+   - Authentication flow: Enable only `Standard flow`
+   - Click **Next**
+
+4. **Login settings**:
+   - Root URL: `https://auth.jade.local`
+   - Valid redirect URIs:
+     ```
+     https://auth.jade.local/oauth2/callback
+     https://itsm.jade.local/oauth2/callback
+     https://translation.jade.local/oauth2/callback
+     ```
+   - Web origins: `+` (allows all valid redirect URIs)
+   - Click **Save**
+
+5. **Get Client Secret**:
+   - Go to **Credentials** tab
+   - Copy the **Client secret**
+   - Update `.env` file:
+     ```bash
+     OAUTH2_PROXY_CLIENT_SECRET=<paste-secret-here>
+     ```
+   - Restart services:
+     ```bash
+     sudo docker compose restart oauth2-proxy nginx
+     ```
+
+### Step 3: Create Test Users
+
+1. Go to **Users** → **Add user**
+2. Username: `testuser`
+3. Email: `test@example.com`
+4. Click **Create**
+5. Go to **Credentials** tab → **Set password**
+6. Password: Choose a password
+7. Temporary: `OFF`
+8. Click **Save**
+
+### Step 4: (Optional) Configure SAML for Shibboleth
+
+1. Go to **Clients** → **Create client**
+2. Client type: `SAML`
+3. Client ID: Your Shibboleth SP entity ID
+4. Configure according to your Shibboleth IdP requirements
+
+Full SAML configuration guide: https://www.keycloak.org/docs/latest/server_admin/#_saml
+
+---
+
+## Domain Selection
+
+### Option A: `.local` domains (Recommended for development)
+
+**Advantages:**
+- Works immediately with `/etc/hosts`
+- No DNS configuration needed
+- Browser accepts cookies for SSO
+
+**Setup:**
 ```bash
-chmod +x scripts/init-letsencrypt.sh
-./scripts/init-letsencrypt.sh
+# Add to /etc/hosts
+127.0.0.1 auth.jade.local itsm.jade.local translation.jade.local
 ```
 
-4. Start full stack with Let's Encrypt:
+**Configure in `.env`:**
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.letsencrypt.yml up -d
+DOMAIN_AUTH=auth.jade.local
+DOMAIN_ITSM=itsm.jade.local
+DOMAIN_DEEPL=translation.jade.local
+OAUTH2_PROXY_COOKIE_DOMAIN=.jade.local
 ```
 
-## 🔧 Configuration
+### Option B: Public domains (Production)
 
-### Update Domains
+**Requirements:**
+- DNS records pointing to your server
+- Valid TLS certificates (Let's Encrypt recommended)
 
-Domains are configured via environment variables in `.env`:
-
+**Configure in `.env`:**
 ```bash
-# Edit .env file
-DOMAIN_AUTH=auth.yourdomain.com
-DOMAIN_ITSM=itsm.yourdomain.com
-DOMAIN_DEEPL=deepl.yourdomain.com
-
-# Authentik needs to know its own URL
-AUTHENTIK_HOST=https://auth.yourdomain.com
-AUTHENTIK_HOST_BROWSER=https://auth.yourdomain.com
-AUTHENTIK_COOKIE_DOMAIN=.yourdomain.com
+DOMAIN_AUTH=auth.example.com
+DOMAIN_ITSM=itsm.example.com
+DOMAIN_DEEPL=deepl.example.com
+OAUTH2_PROXY_COOKIE_DOMAIN=.example.com
+LETSENCRYPT_EMAIL=admin@example.com
 ```
 
-These variables are automatically substituted into nginx configs at container startup. No need to edit nginx config files directly!
+---
 
-**Important Configuration Notes:**
-- `AUTHENTIK_HOST` must match `DOMAIN_AUTH` for the outpost to work correctly
-- `AUTHENTIK_COOKIE_DOMAIN` must use a leading dot (`.yourdomain.com`) for cross-subdomain SSO
-- The `init-letsencrypt.sh` script automatically reads domains from `.env` - no need to edit the script
+## TLS Certificate Modes
 
-#### Domain Selection for Local Testing
+### Mode A: Provided Certificates (Default)
 
-**⚠️ Cookie Compatibility Issue**: When testing locally, domain choice affects cross-subdomain SSO:
+Place your certificates in `./certs/`:
+```bash
+./certs/
+├── fullchain.pem  # Full certificate chain
+└── privkey.pem    # Private key
+```
 
-- **`.local` domains (Recommended)**: Browser-friendly for cookie sharing
-  - Example: `auth.jade.local`, `itsm.jade.local`, `translation.jade.local`
-  - Cookie domain: `.jade.local`
-  - ✅ Works reliably for cross-subdomain authentication
-  
-- **`.test` domains**: May cause cookie rejection in some browsers
-  - Browsers may reject cookies with `.test` cookie domain due to security policies
-  - Symptoms: Login works but session doesn't persist across subdomains
-  - ❌ Not recommended for SSO testing
+### Mode B: Let's Encrypt
 
-**For Local Testing**:
-1. Use `.local` domains in your `.env`:
+1. Update `.env`:
    ```bash
-   DOMAIN_AUTH=auth.jade.local
-   AUTHENTIK_COOKIE_DOMAIN=.jade.local
+   LETSENCRYPT_EMAIL=your-email@example.com
    ```
 
-2. Add to hosts file:
+2. Run init script:
    ```bash
-   # Linux/Mac: /etc/hosts
-   # Windows: C:\Windows\System32\drivers\etc\hosts
-   # WSL2: Use Windows hosts file (C:\Windows\System32\drivers\etc\hosts on Windows side)
-   
-   127.0.0.1 auth.jade.local itsm.jade.local translation.jade.local
+   ./scripts/init-letsencrypt.sh
    ```
 
-3. Regenerate certificates with new domains:
+3. Start with Let's Encrypt override:
    ```bash
-   ./scripts/init-selfsigned.sh
-   # Enter: auth.jade.local,itsm.jade.local,translation.jade.local
+   docker compose -f docker-compose.yml -f docker-compose.letsencrypt.yml up -d
    ```
 
-4. Restart stack:
-   ```bash
-   docker compose down && docker compose up -d
-   ```
+---
 
-## ⚙️ Authentik Initial Setup
-
-**Official Documentation**: [Authentik Installation Guide](https://docs.goauthentik.io/docs/installation/)
-
-### Why Authentik?
-
-✅ **Excellent SAML Support**: Both SAML Service Provider and Identity Provider  
-✅ **IT-Friendly**: Web-based admin UI, no config files  
-✅ **Django Integration**: Perfect for Django apps with forward-auth headers  
-✅ **Active Development**: Modern, well-maintained, Docker-native  
-✅ **Flexible**: Supports LDAP, OAuth, SAML, and more
-
-**Alternative Solutions** (if Authentik doesn't fit your needs):
-- **Keycloak**: More mature, excellent SAML, but heavier (Java-based, higher resource usage)
-- **Authelia**: Lighter weight, simpler, but less feature-rich (limited SAML)
-- **oauth2-proxy**: Very simple forwarding proxy (requires external IdP, no SAML SP mode)
-
-### Step 1: Create Admin Account
-
-Once the stack is running, create your admin account:
-
-1. **Navigate to the initial setup URL**:
-   ```
-   https://auth.localhost/if/flow/initial-setup/
-   ```
-   *(Replace `auth.localhost` with your actual `DOMAIN_AUTH` value)*
-
-2. **Fill in the setup form**:
-   - **Email**: Your administrator email
-   - **Username**: Choose admin username (e.g., `admin`)
-   - **Password**: Strong password (save this!)
-
-3. **Click "Continue"** to complete setup
-
-4. **Login to Authentik**:
-   - URL: `https://auth.localhost/`
-   - Use the credentials you just created
-
-**Note**: The initial setup flow works correctly once cookie domains are properly configured (see Domain Configuration section above).
-
-### Step 2: Configure Forward-Auth Providers
-
-**Reference**: [Authentik Proxy Provider Documentation](https://docs.goauthentik.io/docs/providers/proxy/forward_auth)
-
-After logging in to Authentik admin interface, configure authentication for your applications:
-
-#### For ITSM Application
-
-1. **Create Provider**:
-   - Admin Panel → Applications → Providers → Create
-   - **Type**: Proxy Provider
-   - **Name**: ITSM Proxy
-   - **Authorization flow**: default-provider-authorization-implicit-consent
-   - **Mode**: Forward auth (single application)
-   - **External host**: `https://itsm.localhost` *(use your DOMAIN_ITSM)*
-   - Click **Finish**
-
-2. **Create Application**:
-   - Admin Panel → Applications → Applications → Create
-   - **Name**: ITSM
-   - **Slug**: itsm
-   - **Provider**: Select "ITSM Proxy"
-   - **Launch URL**: `https://itsm.localhost`
-   - Click **Create**
-
-#### For Translation/DeepL Application
-
-Repeat the same process:
-
-1. **Create Provider**:
-   - **Name**: Translation Proxy
-   - **External host**: `https://translation.localhost` *(use your DOMAIN_DEEPL)*
-   
-2. **Create Application**:
-   - **Name**: Translation
-   - **Slug**: translation
-   - **Provider**: Translation Proxy
-   - **Launch URL**: `https://translation.localhost`
-
-#### Create Outpost (Connects nginx to Authentik)
-
-1. Admin Panel → Outposts → Outposts → Create
-2. **Name**: nginx-forward-auth
-3. **Type**: Proxy
-4. **Integration**: Local Docker connection (default)
-5. **Applications**: Select both "ITSM" and "Translation"
-6. Click **Create**
-
-**Verify**: Outpost should show "Healthy" status after creation.
-
-### Step 3: Test Authentication
-
-#### Test ITSM (Mixed Auth)
-
-1. **Public path** (no auth required):
-   - Navigate to: `https://itsm.localhost/`
-   - Should access directly without login
-
-2. **Protected path** (auth required):
-   - Navigate to: `https://itsm.localhost/admin/`
-   - Should redirect to Authentik login
-   - Login with your admin credentials
-   - Should redirect back to `/admin/`
-
-#### Test Translation (Full Auth)
-
-1. Navigate to: `https://translation.localhost/`
-2. Should redirect to Authentik login
-3. Login if not already authenticated
-4. Should access the application with SSO session
-
-**Cross-subdomain SSO**: After logging in on one domain, other subdomains should automatically authenticate without prompting for credentials again (thanks to shared cookie domain).
-
-### Step 4: Configure SAML Federation (Optional)
-
-**Reference**: [Authentik SAML Source Documentation](https://docs.goauthentik.io/docs/sources/saml/)
-
-To integrate with an external Shibboleth IdP:
-
-#### In Authentik
-
-1. Admin Panel → Federation & Social login → Sources → Create
-2. **Type**: SAML Source
-3. **Name**: Shibboleth IdP
-4. **Slug**: shibboleth
-5. **Service Provider Binding**: Post
-6. **SSO URL**: Your Shibboleth IdP's SSO endpoint
-7. **SLO URL**: Your Shibboleth IdP's logout endpoint (optional)
-8. **Issuer**: Your Shibboleth IdP's entity ID
-9. **IdP Metadata**: Paste XML or provide metadata URL
-10. Click **Create**
-
-#### In Shibboleth
-
-Provide your Shibboleth administrator with Authentik's SP metadata:
-
-**Metadata URL**: `https://auth.localhost/api/v3/sources/saml/shibboleth/metadata/`
-
-They need to:
-1. Register Authentik as a Service Provider
-2. Configure attribute release (eduPersonPrincipalName, email, displayName)
-3. Add Authentik's entity ID to allowed SPs
-
-#### Test SAML Login
-
-1. Go to `https://auth.localhost`
-2. Click "Sign in with Shibboleth IdP"
-3. Should redirect to your Shibboleth login page
-4. After authentication, redirected back to Authentik
-
-### Additional Configuration
-
-For more advanced setup:
-- **User directories**: Configure LDAP, SCIM, or other user sources
-- **Groups and permissions**: Set up access control policies
-- **Custom flows**: Customize login, consent, and enrollment processes
-- **Email**: Configure SMTP for password resets and notifications
-- **MFA/2FA**: Enable multi-factor authentication for enhanced security
-
-**Full Documentation**: https://docs.goauthentik.io/
-
-## 🔧 Advanced Configuration
-
-### ITSM Protected Paths
-
-To protect additional paths, edit `nginx/conf.d/itsm.conf`:
-
-```nginx
-# Add new protected location
-location /your/protected/path/ {
-    auth_request /auth-verify;
-    error_page 401 = @error_auth_itsm;
-    
-    auth_request_set $auth_resp_x_authentik_username $upstream_http_x_authentik_username;
-    auth_request_set $auth_resp_x_authentik_email $upstream_http_x_authentik_email;
-    # ... rest of auth configuration
-}
-```
-
-### Header Forwarding
-
-Authenticated requests forward user identity:
-- `X-Remote-User` - Username from Authentik
-- `X-Remote-Email` - Email from Authentik
-
-**Security:** nginx always clears client-provided identity headers to prevent spoofing.
-
-## 🔒 Security Features
-
-### TLS Hardening
-- TLS 1.2+ only (TLS 1.0/1.1 disabled)
-- Modern cipher suites (Mozilla Modern profile)
-- HSTS enabled (1 year, includeSubDomains)
-- OCSP stapling
-- Perfect forward secrecy (DH params)
-
-### nginx Hardening
-- Server tokens disabled (hide version)
-- Security headers (X-Frame-Options, CSP, etc.)
-- Rate limiting (per-IP)
-- Timeout configuration
-- Client max body size limits
+## Network Architecture
 
 ### Network Segmentation
-- Internal networks isolated from internet
-- Only nginx publishes ports to host
-- Service-specific network separation
-- No direct database access from internet
 
-### Authentication
-- Forward-auth integration with Authentik
-- Header spoofing prevention
-- Secure session handling
-- Cookie domain scoping
+```
+proxy (public)
+  └─ nginx:80,443
 
-## 📊 Monitoring & Logs
+auth_backend (internal)
+  ├─ nginx
+  ├─ oauth2-proxy
+  └─ keycloak
 
-### View Logs
+keycloak_db (internal)
+  ├─ keycloak
+  └─ postgres
+
+itsm_backend (external - shared with ITSM stack)
+  ├─ nginx
+  └─ itsm_nginx:8000
+
+deepl_backend (external - shared with Translation stack)
+  ├─ nginx
+  └─ deepl_nginx:8000
+```
+
+### Why External Networks?
+
+The `itsm_backend` and `deepl_backend` networks are **external** because they're shared with other Docker Compose stacks running your Django applications.
+
+**Create them once:**
+```bash
+docker network create itsm_backend
+docker network create deepl_backend
+```
+
+**Connect your Django containers:**
+```yaml
+# In your Django app's docker-compose.yml
+services:
+  itsm_nginx:
+    networks:
+      - itsm_backend
+
+networks:
+  itsm_backend:
+    external: true
+```
+
+---
+
+## Config-as-Code with Keycloak
+
+After initial setup via the web UI, export your realm configuration:
 
 ```bash
-# All services
-docker compose logs -f
+# Export realm to JSON
+sudo docker exec edge_keycloak /opt/keycloak/bin/kc.sh export \
+  --realm jade \
+  --file /tmp/jade-realm.json
 
-# Specific service
-docker compose logs -f nginx
-docker compose logs -f authentik-server
+# Copy to local directory
+sudo docker cp edge_keycloak:/tmp/jade-realm.json ./keycloak/realms/
 
-# nginx access logs (inside container)
-docker compose exec nginx tail -f /var/log/nginx/access.log
+# Edit jade-realm.json as needed (add users, clients, etc.)
 
-# nginx error logs
-docker compose exec nginx tail -f /var/log/nginx/error.log
+# On next restart, Keycloak auto-imports from ./keycloak/realms/
+sudo docker compose restart keycloak
 ```
 
-### Health Checks
+This allows you to manage Keycloak in version control instead of clicking!
+
+---
+
+## Troubleshooting
+
+### Keycloak not starting
+
+**Check logs:**
+```bash
+sudo docker compose logs keycloak
+```
+
+**Common issues:**
+- Database connection failed → Check `POSTGRES_PASSWORD` in `.env`
+- Port already in use → Stop conflicting services
+
+### OAuth2 Proxy returns 500 error
+
+**Check configuration:**
+```bash
+sudo docker compose logs oauth2-proxy
+```
+
+**Common issues:**
+- Invalid client secret → Verify `OAUTH2_PROXY_CLIENT_SECRET` matches Keycloak
+- OIDC issuer URL incorrect → Check `KEYCLOAK_REALM` in `.env`
+
+### Authentication redirects to wrong domain
+
+**Fix cookie domain:**
+1. Verify `OAUTH2_PROXY_COOKIE_DOMAIN=.jade.local` in `.env`
+2. Restart: `sudo docker compose restart oauth2-proxy nginx`
+
+### Can't access services after migration
+
+**Check nginx logs:**
+```bash
+sudo docker compose logs nginx
+```
+
+**Verify nginx templates regenerated:**
+```bash
+ls -l nginx/conf.d/*.conf
+# Should see keycloak.conf, itsm.conf, deepl.conf
+```
+
+**Force regeneration:**
+```bash
+sudo rm nginx/conf.d/*.conf
+sudo docker compose restart nginx
+```
+
+### Test OAuth2 Proxy directly
 
 ```bash
-# Check service health
-docker compose ps
+# Check OAuth2 Proxy health
+curl -k https://auth.jade.local/oauth2/ping
 
-# Test nginx config
-docker compose exec nginx nginx -t
-
-# Check certificate expiry (Let's Encrypt)
-docker compose exec nginx openssl x509 -in /etc/nginx/certs/live/auth.example.org/fullchain.pem -noout -dates
+# Test auth endpoint
+curl -k -v https://itsm.jade.local/oauth2/auth
+# Should return 401 (unauthorized) with redirect header
 ```
 
-### Monitoring Endpoints
+---
 
-- nginx health: `http://localhost/health` (internal only)
-- Authentik health: `https://auth.example.org/-/health/live/`
+## Migration from Authentik
 
-## 🔄 Maintenance
+If you previously used Authentik:
 
-### Update Services
+### Automated Migration
 
 ```bash
-# Pull latest images
-docker compose pull
-
-# Recreate containers
-docker compose up -d
-
-# Or for Let's Encrypt mode
-docker compose -f docker-compose.yml -f docker-compose.letsencrypt.yml up -d
+./scripts/migrate-to-keycloak.sh
 ```
 
-### Backup Database
+This script:
+- Backs up your `.env` file
+- Generates new secrets
+- Updates database configuration
+- Provides step-by-step instructions
 
-```bash
-# Backup PostgreSQL
-docker compose exec postgres pg_dump -U authentik authentik > backup_$(date +%Y%m%d).sql
+### Manual Migration Steps
 
-# Restore
-cat backup_20260108.sql | docker compose exec -T postgres psql -U authentik authentik
-```
-
-### Certificate Renewal (Let's Encrypt)
-
-Automatic renewal runs every 12 hours. Manual renewal:
-
-```bash
-# Force renewal
-docker compose -f docker-compose.yml -f docker-compose.letsencrypt.yml run --rm certbot renew --force-renewal
-
-# Reload nginx
-docker compose exec nginx nginx -s reload
-```
-
-### Reload nginx Config
-
-After modifying nginx configs:
-
-```bash
-# Test configuration
-docker compose exec nginx nginx -t
-
-# Reload (zero-downtime)
-docker compose exec nginx nginx -s reload
-```
-
-## 🛠️ Troubleshooting
-
-### nginx Won't Start
-
-```bash
-# Check configuration syntax
-docker compose exec nginx nginx -t
-
-# Check logs
-docker compose logs nginx
-
-# Common issues:
-# - Missing certificate files
-# - Invalid nginx syntax
-# - Port conflicts (80/443 already in use)
-```
-
-### Authentication Not Working
-
-1. **Verify Authentik is running:**
+1. **Backup data** (if needed):
    ```bash
-   docker compose ps authentik-server
-   curl -k https://auth.localhost/-/health/live/
+   # Export Authentik data if you have important configuration
+   sudo docker compose exec authentik-server ak export > authentik-backup.json
    ```
 
-2. **Verify Authentik outpost configuration:**
-   - Check Authentik admin UI → Outposts → nginx-forward-auth
-   - Should show "Healthy" status
-   - Ensure proxy providers are configured correctly
-   - Verify external host matches your domain exactly
-
-3. **Check auth_request endpoint:**
+2. **Stop Authentik stack**:
    ```bash
-   # Should return 401 or 302 (not 500/502)
-   curl -I https://itsm.localhost/admin/
+   sudo docker compose down -v
    ```
 
-4. **Check nginx logs for auth errors:**
+3. **Update configuration** (already done if using migration script)
+
+4. **Start Keycloak stack**:
    ```bash
-   docker compose logs nginx | grep auth
+   sudo docker compose up -d
    ```
 
-### Cookie/Session Issues (Login Doesn't Persist)
-
-**Problem**: Login works on `auth.localhost` but session doesn't persist when accessing `itsm.localhost`
-
-**Cause**: Cookie domain configuration issue
-
-**Solution**:
-
-1. **Check cookie domain in `.env`:**
+5. **Remove old Authentik volumes** (after verifying Keycloak works):
    ```bash
-   cat .env | grep AUTHENTIK_COOKIE_DOMAIN
-   # Should show: AUTHENTIK_COOKIE_DOMAIN=.localhost (or .jade.local for testing)
+   sudo docker volume rm 0_nginx_authentik_authentik_media
+   sudo docker volume rm 0_nginx_authentik_authentik_templates
+   sudo docker volume rm 0_nginx_authentik_redis_data
    ```
 
-2. **For local testing, use `.local` domains instead of `.test`:**
-   - `.local` domains: Browser-friendly for cross-subdomain cookies ✅
-   - `.test` domains: May be rejected by browsers ❌
+### Key Differences
 
-3. **Verify cookie is being set:**
-   - Open browser DevTools → Application/Storage → Cookies
-   - Should see `authentik_session` cookie with domain `.localhost` (or your domain)
+| Feature | Authentik | Keycloak |
+|---------|-----------|----------|
+| Config | Web UI only | Web UI + JSON export/import |
+| Auth Method | Built-in forward auth | OAuth2 Proxy middleware |
+| SAML Support | Limited | Full SAML 2.0 IdP/SP |
+| Headers | `X-authentik-*` | `X-Auth-Request-*` |
+| Admin Path | `/if/admin/` | `/admin/` |
 
-4. **Restart Authentik after changing cookie domain:**
-   ```bash
-   docker compose restart authentik-server authentik-worker
-   ```
+---
 
-### Cannot Access Upstream Apps
+## Next Steps
 
-1. **Verify external networks exist:**
-   ```bash
-   docker network ls | grep -E "itsm_backend|deepl_backend"
-   ```
+1. ✅ Configure Keycloak realm and OIDC client
+2. ✅ Create test users
+3. ✅ Test authentication on protected paths
+4. Configure SAML for Shibboleth integration
+5. Set up production TLS certificates
+6. Export realm configuration for version control
+7. Configure additional authentication providers (LDAP, OAuth, etc.)
 
-2. **Verify upstream containers are on correct networks:**
-   ```bash
-   docker network inspect itsm_backend
-   # Should show itsm_nginx container
-   ```
+---
 
-3. **Test connectivity from nginx:**
-   ```bash
-   docker compose exec nginx wget -O- http://itsm_nginx:8000
-   ```
+## References
 
-### Authentik Admin UI Returns 502 or Connection Error
-
-1. **Check Authentik is running:**
-   ```bash
-   docker compose ps authentik-server
-   docker compose logs authentik-server
-   ```
-
-2. **Check nginx can reach authentik-server:**
-   ```bash
-   docker compose exec nginx wget -O- http://authentik-server:9000/-/health/live/
-   # Should return "healthy"
-   ```
-
-3. **Verify nginx config was generated correctly:**
-   ```bash
-   docker compose exec nginx cat /etc/nginx/conf.d/authentik.conf | grep server_name
-   # Should show your actual domain, not ${DOMAIN_AUTH}
-   ```
-
-4. **If environment variables weren't substituted:**
-   ```bash
-   # Verify .env file has correct values
-   cat .env | grep DOMAIN_
-   
-   # Restart nginx to regenerate configs
-   docker compose restart nginx
-   ```
-
-### Let's Encrypt Certificate Failure
-
-1. **Verify DNS:**
-   ```bash
-   nslookup itsm.example.org
-   # Should point to your server IP
-   ```
-
-2. **Check port accessibility:**
-   ```bash
-   # From external machine
-   curl http://your-server-ip/.well-known/acme-challenge/test
-   ```
-
-3. **Check rate limits:**
-   - Let's Encrypt: 5 failures per hour per domain
-   - Use staging mode for testing (set `STAGING=1` in init script)
-
-4. **Review certbot logs:**
-   ```bash
-   docker compose logs certbot
-   ```
-
-## 📁 File Structure
-
-```
-0_nginx_authentik/
-├── docker-compose.yml              # Main stack definition
-├── docker-compose.letsencrypt.yml  # Let's Encrypt overlay
-├── .env.example                    # Environment template
-├── .env                           # Your configuration (create from .env.example)
-├── .gitignore                      # Git ignore rules
-├── README.md                      # This file
-│
-├── nginx/
-│   ├── nginx.conf                 # Main nginx config
-│   ├── docker-entrypoint.sh       # Env var substitution script
-│   ├── dhparam.pem               # DH parameters (generate)
-│   └── conf.d/
-│       ├── authentik.conf.template  # auth.example.org (template)
-│       ├── itsm.conf.template       # itsm.example.org (template)
-│       ├── deepl.conf.template      # deepl.example.org (template)
-│       └── *.conf                   # Generated at runtime (gitignored)
-│
-├── certs/                        # TLS certificates (Mode A)
-│   ├── fullchain.pem            # Full cert chain
-│   └── privkey.pem              # Private key
-│
-└── scripts/
-    ├── init-env.sh               # Environment initialization (generates secrets)
-    ├── init-selfsigned.sh        # Self-signed certificate generator (dev/test)
-    └── init-letsencrypt.sh       # Let's Encrypt initialization (production)
-```
-
-## 🔐 Security Checklist
-
-Before deploying to production:
-
-- [ ] Change all default passwords in `.env`
-- [ ] Generate strong `AUTHENTIK_SECRET_KEY` (60+ chars)
-- [ ] Use strong `POSTGRES_PASSWORD` (20+ chars)
-- [ ] Update domains from `example.org` to your actual domains
-- [ ] Generate DH parameters (`openssl dhparam -out nginx/dhparam.pem 2048`)
-- [ ] Verify HSTS is acceptable for your use case (cannot be easily undone)
-- [ ] Configure Authentik email settings for password resets
-- [ ] Set up regular database backups
-- [ ] Review and adjust rate limiting as needed
-- [ ] Test authentication flow thoroughly
-- [ ] Verify header spoofing protection is working
-- [ ] Enable firewall (allow only 22, 80, 443)
-- [ ] Set up monitoring/alerting
-- [ ] Review nginx logs regularly
-- [ ] Keep services updated (security patches)
-
-## 📚 Additional Resources
-
-- [Authentik Documentation](https://docs.goauthentik.io/)
-- [Authentik nginx Proxy Provider](https://docs.goauthentik.io/docs/providers/proxy/)
+- [Keycloak Documentation](https://www.keycloak.org/documentation)
+- [OAuth2 Proxy Documentation](https://oauth2-proxy.github.io/oauth2-proxy/)
+- [Keycloak SAML Guide](https://www.keycloak.org/docs/latest/server_admin/#_saml)
 - [nginx auth_request Module](http://nginx.org/en/docs/http/ngx_http_auth_request_module.html)
-- [Mozilla SSL Configuration Generator](https://ssl-config.mozilla.org/)
-- [Let's Encrypt Documentation](https://letsencrypt.org/docs/)
-- **[GIT_GUIDE.md](GIT_GUIDE.md)** - Git quick reference for Mercurial users
 
-## 📝 License
+---
 
-This configuration is provided as-is for your use. Modify as needed for your environment.
+## License
 
-## ⚠️ Important Notes
+This configuration is provided as-is for use in your projects.
 
-1. **HSTS Warning:** Once HSTS is enabled and browsers cache it, you cannot easily switch back to HTTP. Ensure HTTPS is working properly before enabling HSTS in production.
+---
 
-2. **External Networks:** The `itsm_backend` and `deepl_backend` networks must be created manually and shared with the respective application containers.
-
-3. **Authentik Initial Setup:** Use the `/if/flow/initial-setup/` URL to create your admin account after first startup. Ensure cookie domains are configured correctly (use `.local` domains for local testing, not `.test`).
-
-4. **Production Deployment:** This is a secure baseline configuration. Additional hardening may be needed based on your specific requirements and threat model.
-
-5. **Certificate Renewals:** Let's Encrypt certificates expire after 90 days. The certbot container handles automatic renewal, but monitor logs to ensure it works correctly.
+**Need help?** Check the troubleshooting section or review the Keycloak logs.

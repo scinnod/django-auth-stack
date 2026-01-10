@@ -1,61 +1,42 @@
 # =============================================================================
-# ITSM Application - itsm.example.org
+# ITSM Service Virtual Host Configuration (Keycloak + OAuth2 Proxy)
 # =============================================================================
-# Access policy: MIXED (public + authenticated)
-#   - Most paths are PUBLIC (no authentication required)
-#   - Specific path prefixes require authentication:
-#       * /admin/ and all subpaths
-#       * /restricted/ and all subpaths
-#       * /api/private/ and all subpaths
+# This configuration protects the ITSM Django application with Keycloak SSO
+# via OAuth2 Proxy forward authentication.
 #
-# For authenticated paths, forward user identity headers to upstream:
-#   - X-Remote-User: username from Authentik
-#   - X-Remote-Email: email from Authentik
+# Domain: ${DOMAIN_ITSM} (e.g., itsm.jade.local)
+# Upstream: itsm_nginx:8000 (external Docker container on itsm_backend network)
 #
-# Upstream: itsm_nginx:8000 (external container on itsm_backend network)
+# Authentication:
+#   - Public paths: /health, /static, /media (no auth required)
+#   - Protected paths: /admin/, /restricted/, /api/private/ (requires Keycloak auth)
 # =============================================================================
 
-# -----------------------------------------------------------------------------
-# HTTP -> HTTPS Redirect
-# -----------------------------------------------------------------------------
 server {
     listen 80;
     listen [::]:80;
     server_name ${DOMAIN_ITSM};
-
-    # Allow ACME challenge for Let's Encrypt (if using LE mode)
-    location /.well-known/acme-challenge/ {
-        root /var/www/certbot;
-        try_files $uri =404;
-    }
-
-    # Redirect all other HTTP traffic to HTTPS
+    
+    # Redirect HTTP -> HTTPS
     location / {
-        return 301 https://${DOMAIN_ITSM}$request_uri;
+        return 301 https://$server_name$request_uri;
     }
 }
 
-# -----------------------------------------------------------------------------
-# HTTPS - ITSM Application
-# -----------------------------------------------------------------------------
 server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    listen 443 ssl;
+    listen [::]:443 ssl;
     server_name ${DOMAIN_ITSM};
 
     # -------------------------------------------------------------------------
     # TLS Configuration
     # -------------------------------------------------------------------------
-    # Certificates are mounted at /etc/letsencrypt/
-    # - Provided mode: ./certs/ -> /etc/letsencrypt/
-    # - Let's Encrypt mode: certbot volume -> /etc/letsencrypt/
     ssl_certificate /etc/letsencrypt/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/privkey.pem;
 
     # -------------------------------------------------------------------------
     # Security Headers
     # -------------------------------------------------------------------------
-    # HSTS: Force HTTPS for 1 year (WARNING: Cannot be easily undone!)
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
 
     # -------------------------------------------------------------------------
@@ -65,44 +46,30 @@ server {
     error_log /var/log/nginx/itsm.example.org.error.log warn;
 
     # -------------------------------------------------------------------------
-    # Rate Limiting
+    # PROTECTED PATHS - Require Keycloak Authentication via OAuth2 Proxy
     # -------------------------------------------------------------------------
-    limit_req zone=general burst=50 nodelay;
-
-    # -------------------------------------------------------------------------
-    # PROTECTED PATHS - Require Authentik Authentication
-    # -------------------------------------------------------------------------
+    
     # /admin/* - Administrative interface
     location /admin/ {
-        # ------------------------
-        # Authentik Forward Auth
-        # ------------------------
-        # Verify authentication via Authentik
-        auth_request /auth-verify;
+        # Forward auth check via OAuth2 Proxy
+        auth_request /oauth2/auth;
         
-        # On auth failure, redirect to Authentik login
-        error_page 401 = @error_auth_itsm;
+        # On auth failure, redirect to OAuth2 Proxy (which redirects to Keycloak)
+        error_page 401 = /oauth2/start?rd=$scheme://$http_host$request_uri;
         
-        # Capture identity from Authentik response headers
-        auth_request_set $auth_resp_x_authentik_username $upstream_http_x_authentik_username;
-        auth_request_set $auth_resp_x_authentik_email $upstream_http_x_authentik_email;
-        auth_request_set $auth_resp_set_cookie $upstream_http_set_cookie;
+        # Capture user info from OAuth2 Proxy response
+        auth_request_set $user $upstream_http_x_auth_request_user;
+        auth_request_set $email $upstream_http_x_auth_request_email;
+        auth_request_set $auth_cookie $upstream_http_set_cookie;
         
-        # Forward authentication cookies
-        add_header Set-Cookie $auth_resp_set_cookie;
+        # Forward cookies for session
+        add_header Set-Cookie $auth_cookie;
         
-        # ------------------------
-        # Anti-Spoofing: Clear any client-provided identity headers
-        # ------------------------
-        # CRITICAL: Remove headers before proxying to prevent header injection
-        proxy_set_header X-Remote-User "";
-        proxy_set_header X-Remote-Email "";
-        
-        # ------------------------
-        # Forward verified identity to upstream
-        # ------------------------
-        proxy_set_header X-Remote-User $auth_user;
-        proxy_set_header X-Remote-Email $auth_email;
+        # Forward user identity to upstream application
+        proxy_set_header X-Auth-Request-User $user;
+        proxy_set_header X-Auth-Request-Email $email;
+        proxy_set_header X-Remote-User $user;
+        proxy_set_header X-Remote-Email $email;
         
         # Standard proxy headers
         proxy_set_header Host $host;
@@ -117,22 +84,19 @@ server {
 
     # /restricted/* - Restricted content area
     location /restricted/ {
-        # Same authentication configuration as /admin/
-        auth_request /auth-verify;
-        error_page 401 = @error_auth_itsm;
+        auth_request /oauth2/auth;
+        error_page 401 = /oauth2/start?rd=$scheme://$http_host$request_uri;
         
-        auth_request_set $auth_resp_x_authentik_username $upstream_http_x_authentik_username;
-        auth_request_set $auth_resp_x_authentik_email $upstream_http_x_authentik_email;
-        auth_request_set $auth_resp_set_cookie $upstream_http_set_cookie;
-        add_header Set-Cookie $auth_resp_set_cookie;
+        auth_request_set $user $upstream_http_x_auth_request_user;
+        auth_request_set $email $upstream_http_x_auth_request_email;
+        auth_request_set $auth_cookie $upstream_http_set_cookie;
+        add_header Set-Cookie $auth_cookie;
         
-        # Anti-spoofing + forward identity
-        proxy_set_header X-Remote-User "";
-        proxy_set_header X-Remote-Email "";
-        proxy_set_header X-Remote-User $auth_user;
-        proxy_set_header X-Remote-Email $auth_email;
+        proxy_set_header X-Auth-Request-User $user;
+        proxy_set_header X-Auth-Request-Email $email;
+        proxy_set_header X-Remote-User $user;
+        proxy_set_header X-Remote-Email $email;
         
-        # Standard headers
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -142,24 +106,21 @@ server {
         proxy_pass http://itsm_nginx:8000;
     }
 
-    # /api/private/* - Private API endpoints
+    # /api/private/* - Protected API endpoints
     location /api/private/ {
-        # Same authentication configuration as /admin/
-        auth_request /auth-verify;
-        error_page 401 = @error_auth_itsm;
+        auth_request /oauth2/auth;
+        error_page 401 = /oauth2/start?rd=$scheme://$http_host$request_uri;
         
-        auth_request_set $auth_resp_x_authentik_username $upstream_http_x_authentik_username;
-        auth_request_set $auth_resp_x_authentik_email $upstream_http_x_authentik_email;
-        auth_request_set $auth_resp_set_cookie $upstream_http_set_cookie;
-        add_header Set-Cookie $auth_resp_set_cookie;
+        auth_request_set $user $upstream_http_x_auth_request_user;
+        auth_request_set $email $upstream_http_x_auth_request_email;
+        auth_request_set $auth_cookie $upstream_http_set_cookie;
+        add_header Set-Cookie $auth_cookie;
         
-        # Anti-spoofing + forward identity
-        proxy_set_header X-Remote-User "";
-        proxy_set_header X-Remote-Email "";
-        proxy_set_header X-Remote-User $auth_user;
-        proxy_set_header X-Remote-Email $auth_email;
+        proxy_set_header X-Auth-Request-User $user;
+        proxy_set_header X-Auth-Request-Email $email;
+        proxy_set_header X-Remote-User $user;
+        proxy_set_header X-Remote-Email $email;
         
-        # Standard headers
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -170,61 +131,58 @@ server {
     }
 
     # -------------------------------------------------------------------------
-    # PUBLIC PATHS - No Authentication Required
+    # PUBLIC PATHS - No authentication required
     # -------------------------------------------------------------------------
+    
+    # Health check endpoint
+    location /health {
+        access_log off;
+        proxy_pass http://itsm_nginx:8000;
+        proxy_set_header Host $host;
+    }
+    
+    # Static files (CSS, JS, images)
+    location /static/ {
+        proxy_pass http://itsm_nginx:8000;
+        proxy_set_header Host $host;
+        expires 7d;
+        add_header Cache-Control "public, immutable";
+    }
+    
+    # User-uploaded media files
+    location /media/ {
+        proxy_pass http://itsm_nginx:8000;
+        proxy_set_header Host $host;
+    }
+    
+    # Public API endpoints
+    location /api/public/ {
+        proxy_pass http://itsm_nginx:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    
+    # Default location (public Django views)
     location / {
-        # ------------------------
-        # Anti-Spoofing: ALWAYS clear identity headers for public paths
-        # ------------------------
-        # CRITICAL: Prevent clients from injecting fake identity headers
-        proxy_set_header X-Remote-User "";
-        proxy_set_header X-Remote-Email "";
-        
-        # Standard proxy headers
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-Host $host;
-        
-        # Proxy to upstream ITSM app
         proxy_pass http://itsm_nginx:8000;
-    }
-
-    # -------------------------------------------------------------------------
-    # Internal Location: Auth Verification Subrequest
-    # -------------------------------------------------------------------------
-    # This is called internally by auth_request directive
-    # Contacts Authentik to verify authentication status
-    location = /auth-verify {
-        internal;
-        
-        # Call Authentik forward-auth endpoint
-        proxy_pass http://authentik-server:9000/outpost.goauthentik.io/auth/nginx;
-        
-        # Forward original request information to Authentik
         proxy_set_header Host $host;
-        proxy_set_header X-Original-URL $scheme://$http_host$request_uri;
-        proxy_set_header X-Original-Method $request_method;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-Host $host;
-        
-        # Forward cookies for session validation
-        proxy_pass_request_body off;
-        proxy_set_header Content-Length "";
-        
-        # Timeouts for auth check
-        proxy_read_timeout 10s;
-        proxy_connect_timeout 5s;
     }
 
     # -------------------------------------------------------------------------
-    # Error Handler: Authentication Required
+    # OAuth2 Proxy Integration
     # -------------------------------------------------------------------------
-    location @error_auth_itsm {
-        # Redirect to Authentik login with return URL
-        return 302 https://${DOMAIN_AUTH}/outpost.goauthentik.io/start?rd=$scheme://$http_host$request_uri;
+    location /oauth2/ {
+        proxy_pass http://oauth2-proxy:4180;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
     }
 }
