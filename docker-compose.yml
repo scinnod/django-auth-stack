@@ -127,7 +127,7 @@ services:
       - --whitelist-domain=${OAUTH2_PROXY_COOKIE_DOMAIN:-.example.org}
       - --provider=oidc
       - --provider-display-name=Keycloak
-      - --oidc-issuer-url=https://${DOMAIN_AUTH:-auth.example.org}/realms/${KEYCLOAK_REALM:-master}
+      - --oidc-issuer-url=http://keycloak:8080/realms/${KEYCLOAK_REALM:-master}
       - --redirect-url=https://${DOMAIN_AUTH:-auth.example.org}/oauth2/callback
       - --reverse-proxy=true
       - --set-xauthrequest=true
@@ -135,6 +135,10 @@ services:
       - --pass-authorization-header=true
       - --set-authorization-header=true
       - --skip-provider-button=true
+      - --insecure-oidc-skip-issuer-verification=true
+      - --ssl-insecure-skip-verify=true
+      - --skip-claims-from-profile-url=true
+      - --insecure-oidc-allow-unverified-email=true
     environment:
       OAUTH2_PROXY_CLIENT_ID: ${OAUTH2_PROXY_CLIENT_ID:?OAUTH2_PROXY_CLIENT_ID must be set}
       OAUTH2_PROXY_CLIENT_SECRET: ${OAUTH2_PROXY_CLIENT_SECRET:?OAUTH2_PROXY_CLIENT_SECRET must be set}
@@ -144,11 +148,6 @@ services:
     depends_on:
       keycloak:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4180/ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
     security_opt:
       - no-new-privileges:true
 
