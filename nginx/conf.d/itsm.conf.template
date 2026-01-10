@@ -1,15 +1,25 @@
 # =============================================================================
 # ITSM Service Virtual Host Configuration (Keycloak + OAuth2 Proxy)
 # =============================================================================
-# This configuration protects the ITSM Django application with Keycloak SSO
-# via OAuth2 Proxy forward authentication.
+# This configuration integrates Django's authentication system with Keycloak SSO.
 #
 # Domain: ${DOMAIN_ITSM} (e.g., itsm.jade.local)
 # Upstream: itsm_nginx:8000 (external Docker container on itsm_backend network)
 #
-# Authentication:
-#   - Public paths: /health, /static, /media (no auth required)
-#   - Protected paths: /admin/, /restricted/, /api/private/ (requires Keycloak auth)
+# Authentication Pattern:
+#   - Django handles authorization with @login_required decorators
+#   - OAuth2-proxy handles Keycloak authentication at nginx level
+#   - Public paths bypass OAuth2-proxy (static, media, health)
+#   - All other paths get authenticated user headers from OAuth2-proxy
+#   - Django uses RemoteUserBackend to trust the X-Remote-User header
+#
+# Flow:
+#   1. User accesses protected Django view (with @login_required)
+#   2. Nginx forwards to OAuth2-proxy for authentication
+#   3. OAuth2-proxy redirects to Keycloak if not authenticated
+#   4. After Keycloak login, OAuth2-proxy sets X-Remote-User header
+#   5. Django receives header, creates/updates session via RemoteUserBackend
+#   6. Django's @login_required decorator sees authenticated user
 # =============================================================================
 
 server {
@@ -46,102 +56,21 @@ server {
     error_log /var/log/nginx/itsm.example.org.error.log warn;
 
     # -------------------------------------------------------------------------
-    # PROTECTED PATHS - Require Keycloak Authentication via OAuth2 Proxy
-    # -------------------------------------------------------------------------
-    
-    # /admin/* - Administrative interface
-    location /admin/ {
-        # Forward auth check via OAuth2 Proxy
-        auth_request /oauth2/auth;
-        
-        # On auth failure, redirect to OAuth2 Proxy (which redirects to Keycloak)
-        error_page 401 = /oauth2/start?rd=$scheme://$http_host$request_uri;
-        
-        # Capture user info from OAuth2 Proxy response
-        auth_request_set $user $upstream_http_x_auth_request_user;
-        auth_request_set $email $upstream_http_x_auth_request_email;
-        auth_request_set $auth_cookie $upstream_http_set_cookie;
-        
-        # Forward cookies for session
-        add_header Set-Cookie $auth_cookie;
-        
-        # Forward user identity to upstream application
-        proxy_set_header X-Auth-Request-User $user;
-        proxy_set_header X-Auth-Request-Email $email;
-        proxy_set_header X-Remote-User $user;
-        proxy_set_header X-Remote-Email $email;
-        
-        # Standard proxy headers
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-Host $host;
-        
-        # Proxy to upstream ITSM app
-        proxy_pass http://itsm_nginx:8000;
-    }
-
-    # /restricted/* - Restricted content area
-    location /restricted/ {
-        auth_request /oauth2/auth;
-        error_page 401 = /oauth2/start?rd=$scheme://$http_host$request_uri;
-        
-        auth_request_set $user $upstream_http_x_auth_request_user;
-        auth_request_set $email $upstream_http_x_auth_request_email;
-        auth_request_set $auth_cookie $upstream_http_set_cookie;
-        add_header Set-Cookie $auth_cookie;
-        
-        proxy_set_header X-Auth-Request-User $user;
-        proxy_set_header X-Auth-Request-Email $email;
-        proxy_set_header X-Remote-User $user;
-        proxy_set_header X-Remote-Email $email;
-        
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-Host $host;
-        
-        proxy_pass http://itsm_nginx:8000;
-    }
-
-    # /api/private/* - Protected API endpoints
-    location /api/private/ {
-        auth_request /oauth2/auth;
-        error_page 401 = /oauth2/start?rd=$scheme://$http_host$request_uri;
-        
-        auth_request_set $user $upstream_http_x_auth_request_user;
-        auth_request_set $email $upstream_http_x_auth_request_email;
-        auth_request_set $auth_cookie $upstream_http_set_cookie;
-        add_header Set-Cookie $auth_cookie;
-        
-        proxy_set_header X-Auth-Request-User $user;
-        proxy_set_header X-Auth-Request-Email $email;
-        proxy_set_header X-Remote-User $user;
-        proxy_set_header X-Remote-Email $email;
-        
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-Host $host;
-        
-        proxy_pass http://itsm_nginx:8000;
-    }
-
-    # -------------------------------------------------------------------------
     # PUBLIC PATHS - No authentication required
     # -------------------------------------------------------------------------
+    # These paths bypass OAuth2-proxy completely. Django handles them directly.
     
     # Health check endpoint
-    location /health {
+    location = /health {
         access_log off;
         proxy_pass http://itsm_nginx:8000;
         proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
     
-    # Static files (CSS, JS, images)
+    # Static files (CSS, JS, images) - Django collectstatic
     location /static/ {
         proxy_pass http://itsm_nginx:8000;
         proxy_set_header Host $host;
@@ -153,25 +82,39 @@ server {
     location /media/ {
         proxy_pass http://itsm_nginx:8000;
         proxy_set_header Host $host;
+        expires 1d;
     }
     
-    # Public API endpoints
-    location /api/public/ {
-        proxy_pass http://itsm_nginx:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
+    # -------------------------------------------------------------------------
+    # ALL OTHER PATHS - Authentication via OAuth2-proxy, Authorization via Django
+    # -------------------------------------------------------------------------
+    # nginx validates authentication, Django handles authorization (@login_required).
+    # Works with Django i18n_patterns (/de/*, /en/*, etc.) - language prefix is
+    # preserved in $request_uri for OAuth2-proxy redirects.
     
-    # Default location (public Django views)
     location / {
-        proxy_pass http://itsm_nginx:8000;
+        auth_request /oauth2/auth;
+        error_page 401 = /oauth2/start?rd=$scheme://$http_host$request_uri;
+        
+        auth_request_set $user $upstream_http_x_auth_request_user;
+        auth_request_set $email $upstream_http_x_auth_request_email;
+        auth_request_set $auth_cookie $upstream_http_set_cookie;
+        add_header Set-Cookie $auth_cookie;
+        
+        proxy_set_header X-Auth-Request-User $user;
+        proxy_set_header X-Auth-Request-Email $email;
+        proxy_set_header X-Remote-User $user;
+        proxy_set_header X-Remote-Email $email;
+        
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-Host $host;
+        
+        proxy_pass http://itsm_nginx:8000;
+        proxy_buffering off;
+        proxy_http_version 1.1;
     }
 
     # -------------------------------------------------------------------------

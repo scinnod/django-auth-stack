@@ -20,8 +20,10 @@ Production-ready authentication gateway combining nginx reverse proxy with Keycl
 5. [Domain Selection](#domain-selection)
 6. [TLS Certificate Modes](#tls-certificate-modes)
 7. [Network Architecture](#network-architecture)
-8. [Troubleshooting](#troubleshooting)
-9. [Migration from Authentik](#migration-from-authentik)
+8. [Django Integration](#django-integration)
+9. [Production Readiness](#production-readiness)
+10. [Troubleshooting](#troubleshooting)
+11. [Migration from Authentik](#migration-from-authentik)
 
 ---
 
@@ -60,13 +62,23 @@ docker network create deepl_backend
 
 ### 2. Configure Environment
 
-Run the migration script to generate secrets and update `.env`:
+Run the initialization script to generate secure passwords and configure domains:
 
 ```bash
-./scripts/migrate-to-keycloak.sh
+./scripts/init-env.sh
 ```
 
-Or manually edit `.env` file (see `.env.keycloak` template).
+This will:
+- Generate secure Keycloak admin password
+- Generate OAuth2-proxy secrets
+- Prompt for domain configuration
+- Create `.env` file with all required variables
+
+Alternatively, manually copy and edit:
+```bash
+cp .env.example .env
+# Edit .env with your values
+```
 
 ### 3. Start Services
 
@@ -343,6 +355,126 @@ sudo docker compose restart keycloak
 ```
 
 This allows you to manage Keycloak in version control instead of clicking!
+
+---
+
+## Django Integration
+
+This stack is designed to work with Django applications using the **standard RemoteUserBackend pattern**.
+
+### How It Works
+
+1. **Nginx** validates users are authenticated via OAuth2-proxy
+2. **OAuth2-proxy** handles Keycloak OIDC authentication
+3. **Nginx** passes `X-Remote-User` header to Django
+4. **Django** creates/manages sessions using `RemoteUserBackend`
+5. **Django's `@login_required`** decorators work normally!
+
+### Django Configuration (Minimal)
+
+```python
+# settings.py
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.RemoteUserBackend',
+    'django.contrib.auth.backends.ModelBackend',
+]
+
+MIDDLEWARE = [
+    # ... other middleware ...
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.auth.middleware.RemoteUserMiddleware',  # Add this!
+    # ... other middleware ...
+]
+
+REMOTE_USER_HEADER = 'HTTP_X_REMOTE_USER'
+```
+
+### Complete Integration Guide
+
+For detailed configuration, troubleshooting, and examples:
+
+📖 **[Django Integration Guide](keycloak/DJANGO_INTEGRATION.md)**
+
+Includes:
+- Complete settings.py configuration
+- @login_required decorator usage
+- **Django i18n_patterns support** (works seamlessly with `/de/admin/`, `/en/admin/`, etc.)
+- Auto-creating users from Keycloak
+- Logout handling
+- Security considerations
+- Troubleshooting common issues
+
+---
+
+## Production Readiness
+
+This stack is **production-ready** with the following configurations:
+
+### ✅ Security
+- TLS 1.2/1.3 only, modern cipher suites (Mozilla Modern profile)
+- HSTS, X-Frame-Options, X-Content-Type-Options headers
+- Network segmentation (internal networks for sensitive services)
+- `no-new-privileges` security option on all containers
+- OAuth2-proxy validates authentication before nginx forwards requests
+
+### ✅ nginx Configuration
+- Hardened defaults for production edge proxy
+- OCSP stapling for certificate validation
+- Gzip compression enabled
+- Proper proxy headers (X-Forwarded-*, X-Real-IP)
+- WebSocket support
+- Health check endpoint
+- Rate limiting **disabled** (suitable for reverse proxy setups where multiple users share few IPs)
+
+### ✅ Keycloak
+- PostgreSQL database (recommended for production by Keycloak)
+- `KC_PROXY=edge` mode (behind reverse proxy)
+- Metrics and health endpoints enabled
+- Config-as-code support via realm imports
+- Transaction XA disabled (recommended for PostgreSQL)
+
+### ✅ OAuth2-proxy Configuration
+
+The OAuth2-proxy configuration includes several `--insecure-*` flags that are **safe for production** in this specific architecture:
+
+- `--insecure-oidc-skip-issuer-verification=true`: Required because OAuth2-proxy talks to Keycloak via internal Docker network (`http://keycloak:8080`) while the public OIDC issuer is `https://auth.yourdomain.com`. This is **standard for reverse proxy setups**.
+  
+- `--ssl-insecure-skip-verify=true`: OAuth2-proxy → Keycloak communication is over internal Docker network using HTTP (not HTTPS). External TLS is handled by nginx. This is **secure** because the internal network is isolated.
+
+- `--insecure-oidc-allow-unverified-email=true`: Allows users to login even if their email isn't verified in Keycloak. Change to `false` if you require email verification.
+
+- `--skip-claims-from-profile-url=true`: Optimization to avoid extra OIDC userinfo endpoint call. User info comes from ID token instead. Safe for production.
+
+These flags address the **internal vs external URL mismatch** inherent to reverse proxy setups and do not compromise security when properly configured with network isolation.
+
+### ✅ Health Checks
+- PostgreSQL: `pg_isready` check
+- Keycloak: Simple TCP check (port 8080)
+- nginx: HTTP health endpoint check
+- OAuth2-proxy: No health check (minimal image, runs reliably without one)
+
+### ✅ Let's Encrypt Support
+Built-in support for automatic certificate renewal:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.letsencrypt.yml up -d
+```
+
+### Production Checklist
+
+Before deploying to production:
+
+1. **Change domains** from `*.jade.local` to your production domains in `.env`
+2. **Use real TLS certificates**:
+   - Either provide certificates in `./certs/` (fullchain.pem, privkey.pem)
+   - Or use Let's Encrypt override (see TLS Certificate Modes section)
+3. **Update Keycloak realm configuration**:
+   - Configure your OAuth2 client in Keycloak admin console
+   - Export realm to `./keycloak/realms/` for version control
+4. **Secure all passwords** in `.env` (auto-generated by init-env.sh script)
+5. **Configure external networks**: Create `itsm_backend` and `deepl_backend` networks
+6. **Review firewall rules**: Ensure only ports 80/443 are exposed
+7. **Set up log rotation** for nginx logs volume
+8. **Configure backup** for PostgreSQL volume
 
 ---
 

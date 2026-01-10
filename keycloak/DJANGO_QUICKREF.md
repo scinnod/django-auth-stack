@@ -1,0 +1,209 @@
+# Django + Keycloak Quick Reference
+
+## Minimal Configuration
+
+### settings.py
+```python
+# Authentication backends
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.RemoteUserBackend',
+    'django.contrib.auth.backends.ModelBackend',
+]
+
+# Middleware - order matters!
+MIDDLEWARE = [
+    'django.middleware.security.SecurityMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',  # BEFORE RemoteUserMiddleware
+    'django.contrib.auth.middleware.RemoteUserMiddleware',      # AFTER AuthenticationMiddleware
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+]
+
+# Header configuration
+REMOTE_USER_HEADER = 'HTTP_X_REMOTE_USER'
+
+# CSRF trusted origins (for reverse proxy)
+CSRF_TRUSTED_ORIGINS = [
+    'https://itsm.jade.local',
+    'https://auth.jade.local',
+]
+```
+
+## Usage in Views
+
+### Protected Views
+```python
+from django.contrib.auth.decorators import login_required
+
+@login_required
+def my_view(request):
+    # User is automatically authenticated via Keycloak
+    # request.user is populated from X-Remote-User header
+    return render(request, 'template.html', {
+        'username': request.user.username,
+        'email': request.user.email,
+    })
+```
+
+### Django i18n_patterns Compatibility
+
+The nginx configuration **fully supports** Django's `i18n_patterns()`:
+
+```python
+# urls.py
+from django.conf.urls.i18n import i18n_patterns
+from django.urls import path
+
+urlpatterns = i18n_patterns(
+    path('admin/', admin.site.urls),
+    path('dashboard/', views.dashboard),
+    # Paths will be: /de/admin/, /en/admin/, /de/dashboard/, /en/dashboard/
+)
+```
+
+**How it works:**
+- User accesses `/de/admin/` (not authenticated)
+- nginx redirects to `/oauth2/start?rd=https://itsm.jade.local/de/admin/`
+- After Keycloak login, OAuth2-proxy redirects back to `/de/admin/` (language prefix preserved!)
+- Django receives request with X-Remote-User header and correct language prefix
+- Everything works as expected with `@login_required` decorators
+
+**No nginx configuration changes needed** - the `location /` block matches all paths including language-prefixed ones.
+
+### Public Views (No Decorator)
+```python
+def public_view(request):
+    # Still accessible, but user is authenticated if they logged in elsewhere
+    if request.user.is_authenticated:
+        return HttpResponse(f"Hello {request.user.username}")
+    else:
+        return HttpResponse("Hello anonymous user")
+```
+
+### Class-Based Views
+```python
+from django.contrib.auth.mixins import LoginRequiredMixin
+
+class ProtectedView(LoginRequiredMixin, View):
+    def get(self, request):
+        # User is authenticated
+        return render(request, 'template.html')
+```
+
+## Logout
+
+```python
+from django.contrib.auth import logout
+from django.shortcuts import redirect
+
+def logout_view(request):
+    # Logout from Django
+    logout(request)
+    
+    # Redirect to OAuth2-proxy logout (clears Keycloak session)
+    return redirect('/oauth2/sign_out?rd=/')
+```
+
+## Custom User Creation
+
+### Populate Email from Keycloak
+```python
+# yourapp/backends.py
+from django.contrib.auth.backends import RemoteUserBackend
+
+class CustomRemoteUserBackend(RemoteUserBackend):
+    def configure_user(self, request, user):
+        """Called when user is created for the first time."""
+        user.email = request.META.get('HTTP_X_REMOTE_EMAIL', '')
+        user.save()
+        return user
+```
+
+```python
+# settings.py
+AUTHENTICATION_BACKENDS = [
+    'yourapp.backends.CustomRemoteUserBackend',  # Use custom backend
+    'django.contrib.auth.backends.ModelBackend',
+]
+```
+
+## Testing
+
+### Check Headers in View
+```python
+@login_required
+def debug_auth(request):
+    return JsonResponse({
+        'user': request.user.username,
+        'email': request.user.email,
+        'is_authenticated': request.user.is_authenticated,
+        'headers': {
+            'HTTP_X_REMOTE_USER': request.META.get('HTTP_X_REMOTE_USER'),
+            'HTTP_X_REMOTE_EMAIL': request.META.get('HTTP_X_REMOTE_EMAIL'),
+        }
+    }, indent=2)
+```
+
+### Command Line Test
+```bash
+# Not authenticated - should redirect to Keycloak
+curl -I https://itsm.jade.local/protected/
+# Expected: HTTP 302 → /oauth2/start
+
+# After login (with cookie)
+curl -H "Cookie: _oauth2_proxy=..." https://itsm.jade.local/protected/
+# Expected: HTTP 200
+```
+
+## Troubleshooting
+
+### Problem: request.user is AnonymousUser
+**Check:**
+1. Is `RemoteUserMiddleware` in `MIDDLEWARE`?
+2. Is `RemoteUserMiddleware` AFTER `AuthenticationMiddleware`?
+3. Is `REMOTE_USER_HEADER = 'HTTP_X_REMOTE_USER'` set?
+4. Is nginx setting the header? (Check with debug view above)
+
+### Problem: Users not auto-created
+**Check:**
+1. Is `RemoteUserBackend` in `AUTHENTICATION_BACKENDS`?
+2. Have you run migrations? (`python manage.py migrate`)
+
+### Problem: Logout doesn't work
+**Solution:** Redirect to OAuth2-proxy logout endpoint
+```python
+def logout_view(request):
+    logout(request)
+    return redirect('/oauth2/sign_out?rd=/')  # Important!
+```
+
+## What Happens Under the Hood
+
+1. User accesses Django URL (e.g., `/admin/`)
+2. Nginx checks authentication via OAuth2-proxy
+3. If not authenticated → redirect to Keycloak login
+4. After Keycloak login → OAuth2-proxy sets cookie
+5. Nginx forwards request with `X-Remote-User: username` header
+6. Django `RemoteUserMiddleware` reads header
+7. Django `RemoteUserBackend` creates/loads User object
+8. Django creates session for the user
+9. `@login_required` sees `request.user.is_authenticated = True`
+10. View executes normally
+
+## Public Paths (No Authentication)
+
+These paths bypass OAuth2-proxy completely:
+- `/static/` - Static files (CSS, JS, images)
+- `/media/` - User uploads
+- `/health` - Health check endpoint
+
+All other paths require authentication!
+
+## Documentation
+
+- **Detailed Guide**: [keycloak/DJANGO_INTEGRATION.md](keycloak/DJANGO_INTEGRATION.md)
+- **Django Docs**: https://docs.djangoproject.com/en/stable/howto/auth-remote-user/
+- **OAuth2-proxy**: https://oauth2-proxy.github.io/oauth2-proxy/
