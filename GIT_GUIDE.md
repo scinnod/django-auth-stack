@@ -45,7 +45,7 @@ A practical guide for using Git with this project, tailored for users coming fro
 
 ### 1. Initialize Git Repository
 ```bash
-cd /home/da1061/docker/jade-prod/0_nginx_authentik
+cd /home/da1061/docker/jade-prod/0_nginx_auth_keykloak
 
 # Initialize git repo (like hg init)
 git init
@@ -98,7 +98,7 @@ git add -A
 git status
 
 # Commit
-git commit -m "Initial commit: Edge-auth stack with nginx + Authentik"
+git commit -m "Initial commit: Edge-auth stack with nginx + Keycloak"
 
 # Push to GitHub
 git push -u origin main
@@ -398,7 +398,7 @@ git diff
 
 # Commit everything
 git add -A
-git commit -m "Update authentik version to 2024.12"
+git commit -m "Update keycloak version to 23.0"
 
 # Push to GitHub backup
 git push
