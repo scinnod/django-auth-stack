@@ -2,7 +2,10 @@
 # Edge-Auth Stack: nginx reverse proxy + Keycloak SSO
 # =============================================================================
 # Copyright (C) 2024-2026 David Kleinhans, Jade University of Applied Sciences
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
+# =============================================================================
+# TODO: Verify all third-party Docker images are compatible with Apache-2.0
+# TODO: Review licenses of: nginx, keycloak, oauth2-proxy, postgres images
 # =============================================================================
 # This compose file defines the authentication gateway stack:
 #   - nginx: public-facing reverse proxy (ports 80/443)

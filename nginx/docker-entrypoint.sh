@@ -3,6 +3,9 @@
 # =============================================================================
 # Nginx Entrypoint Script - Environment Variable Substitution
 # =============================================================================
+# Copyright (C) 2024-2026 David Kleinhans, Jade University of Applied Sciences
+# SPDX-License-Identifier: Apache-2.0
+# =============================================================================
 # This script runs before nginx starts and substitutes environment variables
 # in configuration files, allowing dynamic configuration without editing files.
 # =============================================================================

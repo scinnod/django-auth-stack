@@ -3,6 +3,9 @@
 # =============================================================================
 # Let's Encrypt Initialization Script
 # =============================================================================
+# Copyright (C) 2024-2026 David Kleinhans, Jade University of Applied Sciences
+# SPDX-License-Identifier: Apache-2.0
+# =============================================================================
 # This script obtains initial TLS certificates from Let's Encrypt for all
 # configured domains. Run this ONCE before starting the stack in LE mode.
 #

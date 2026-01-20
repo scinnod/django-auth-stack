@@ -3,6 +3,9 @@
 # =============================================================================
 # Self-Signed Certificate Generation Script
 # =============================================================================
+# Copyright (C) 2024-2026 David Kleinhans, Jade University of Applied Sciences
+# SPDX-License-Identifier: Apache-2.0
+# =============================================================================
 # This script generates self-signed TLS certificates for development/testing.
 # 
 # WARNING: Self-signed certificates are NOT suitable for production!

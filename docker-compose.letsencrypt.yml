@@ -2,7 +2,7 @@
 # Docker Compose Override for Let's Encrypt Mode
 # =============================================================================
 # Copyright (C) 2024-2026 David Kleinhans, Jade University of Applied Sciences
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 # =============================================================================
 # This file adds certbot for automated TLS certificate issuance/renewal
 # via Let's Encrypt ACME protocol.

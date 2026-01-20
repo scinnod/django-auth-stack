@@ -1,6 +1,9 @@
 # =============================================================================
 # Keycloak Virtual Host Configuration
 # =============================================================================
+# Copyright (C) 2024-2026 David Kleinhans, Jade University of Applied Sciences
+# SPDX-License-Identifier: Apache-2.0
+# =============================================================================
 # This serves the Keycloak admin console and OAuth2/OIDC endpoints
 # Domain: ${DOMAIN_AUTH} (e.g., auth.jade.local)
 # =============================================================================

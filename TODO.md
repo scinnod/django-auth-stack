@@ -1,12 +1,28 @@
+<!--
+SPDX-FileCopyrightText: 2024-2026 David Kleinhans, Jade University of Applied Sciences
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # Pre-Publication Checklist
 
 ## ✅ Completed
 
 - [x] **SECURITY.md** - Added contact email (david.kleinhans@jade-hs.de)
-- [x] **LICENSE** - Full AGPL-3.0 with copyright attribution to David Kleinhans, Jade University
-- [x] **CONTRIBUTING.md** - University infrastructure guidelines added
-- [x] **License headers** - Added to docker-compose.yml, nginx.conf, init-env.sh, etc.
+- [x] **LICENSE** - Full Apache-2.0 with copyright attribution to David Kleinhans, Jade University
+- [x] **NOTICE** - Created with Apache-2.0 notice and third-party component licenses
+- [x] **CONTRIBUTING.md** - University infrastructure guidelines added, Apache-2.0 license
+- [x] **License headers** - Updated all SPDX headers from AGPL-3.0-or-later to Apache-2.0
 - [x] **Documentation** - Restructured into docs/ folder with consistent naming
+- [x] **README** - Updated license badge and license section to Apache-2.0
+
+## License Conversion Verification TODOs
+
+- [ ] **TODO: Verify third-party licenses** - Confirm all third-party component licenses in NOTICE file are accurate and up-to-date
+- [ ] **TODO: Missing SPDX headers** - Check if any new files need SPDX-License-Identifier: Apache-2.0 headers
+- [ ] **TODO: License references in configs** - Verify no AGPL references remain in configuration files, comments, or deployment scripts
+- [ ] **TODO: Documentation license updates** - Ensure all documentation files reference Apache-2.0 correctly
+- [ ] **TODO: Review NOTICE file** - Annually review and update third-party component versions and licenses
+- [ ] **TODO: Verify compliance** - Ensure all dependencies are compatible with Apache-2.0 licensing
 
 ## Before Publishing
 

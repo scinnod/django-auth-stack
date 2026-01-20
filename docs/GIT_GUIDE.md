@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2024-2026 David Kleinhans, Jade University of Applied Sciences
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # Git Quick Reference for Mercurial Users
 
 A practical guide for using Git with this project, tailored for users coming from Mercurial (hg).

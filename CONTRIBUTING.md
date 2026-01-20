@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2024-2026 David Kleinhans, Jade University of Applied Sciences
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # Contributing
 
 This is an open-source project developed at [Jade University of Applied Sciences](https://www.jade-hs.de/).
@@ -6,7 +11,7 @@ Contributions are welcome! However, please note that this is a **university infr
 
 ## Philosophy
 
-This project is **free to use** under the AGPL-3.0 license. We share it to help others implement similar authentication solutions. However:
+This project is **free to use** under the Apache-2.0 license. We share it to help others implement similar authentication solutions. However:
 
 - **Support resources are limited** - We cannot provide extensive individual support
 - **Contributions are valued** - We welcome contributions from those who benefit from the project
@@ -52,7 +57,7 @@ This project is **free to use** under the AGPL-3.0 license. We share it to help 
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the [GNU Affero General Public License v3.0](LICENSE).
+By contributing, you agree that your contributions will be licensed under the [Apache License 2.0](LICENSE).
 
 ## Contact
 

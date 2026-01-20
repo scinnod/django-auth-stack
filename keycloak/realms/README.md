@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2024-2026 David Kleinhans, Jade University of Applied Sciences
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # Keycloak Realm Configuration (Config-as-Code)
 
 This directory is for storing Keycloak realm configurations as JSON files.

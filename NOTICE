@@ -1,0 +1,63 @@
+Keycloak Server Configuration
+Copyright (C) 2024-2026 David Kleinhans, Jade University of Applied Sciences
+
+This product is licensed under the Apache License, Version 2.0 (the "License").
+You may not use this product except in compliance with the License.
+A copy of the License is included in this distribution in the LICENSE file,
+or you may obtain a copy at: http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+===============================================================================
+
+This product includes or integrates with the following third-party software:
+
+-------------------------------------------------------------------------------
+Keycloak
+Copyright (C) Red Hat, Inc.
+Licensed under the Apache License, Version 2.0
+https://www.keycloak.org/
+https://github.com/keycloak/keycloak
+
+Keycloak is an open source identity and access management solution that
+provides SSO, identity brokering, and social login capabilities.
+
+-------------------------------------------------------------------------------
+nginx
+Copyright (C) 2002-2024 Igor Sysoev
+Copyright (C) 2011-2024 Nginx, Inc.
+Licensed under the BSD 2-Clause License
+https://nginx.org/
+https://github.com/nginx/nginx
+
+nginx is a high-performance HTTP server and reverse proxy.
+
+-------------------------------------------------------------------------------
+OAuth2 Proxy
+Copyright (C) OAuth2 Proxy Contributors
+Licensed under the MIT License
+https://oauth2-proxy.github.io/oauth2-proxy/
+https://github.com/oauth2-proxy/oauth2-proxy
+
+OAuth2 Proxy is a reverse proxy that provides authentication with Google,
+GitHub, and other providers via OAuth 2.0 and OpenID Connect.
+
+-------------------------------------------------------------------------------
+PostgreSQL
+Copyright (C) 1996-2024, PostgreSQL Global Development Group
+Licensed under the PostgreSQL License
+https://www.postgresql.org/
+
+PostgreSQL is a powerful, open source object-relational database system.
+
+-------------------------------------------------------------------------------
+
+For complete license information for each dependency, please refer to the
+respective project's license file or documentation.
+
+TODO: Verify all third-party component licenses are correctly attributed
+TODO: Review and update dependency versions and license information annually

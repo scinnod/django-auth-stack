@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2024-2026 David Kleinhans, Jade University of Applied Sciences
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # Django Integration with Keycloak via OAuth2-proxy
 
 This document describes the **standard** Django configuration patterns for integrating with Keycloak SSO using OAuth2-proxy as the authentication gateway.

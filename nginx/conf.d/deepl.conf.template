@@ -1,6 +1,9 @@
 # =============================================================================
 # Translation Service Virtual Host Configuration (Keycloak + OAuth2 Proxy)
 # =============================================================================
+# Copyright (C) 2024-2026 David Kleinhans, Jade University of Applied Sciences
+# SPDX-License-Identifier: Apache-2.0
+# =============================================================================
 # AUTHENTICATION PATTERN: Full nginx-Level Authentication
 #
 # This configuration requires Keycloak login for ALL requests (including static
