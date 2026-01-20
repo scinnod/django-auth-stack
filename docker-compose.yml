@@ -142,10 +142,16 @@ services:
       - --pass-authorization-header=true
       - --set-authorization-header=true
       - --skip-provider-button=true
+      # Development/Self-signed cert flags (remove for production with valid TLS):
       - --insecure-oidc-skip-issuer-verification=true
       - --ssl-insecure-skip-verify=true
-      - --skip-claims-from-profile-url=true
       - --insecure-oidc-allow-unverified-email=true
+      # Note: These flags allow oauth2-proxy to work with:
+      #   - Self-signed certificates (common in dev/staging)
+      #   - Internal Keycloak URL (http://keycloak:8080)
+      #   - Unverified email addresses
+      # For production with proper certificates, consider removing these.
+      - --skip-claims-from-profile-url=true
       # Use PKCE for enhanced security (recommended for Keycloak)
       - --code-challenge-method=S256
     environment:
