@@ -57,14 +57,23 @@ Result: User is fully logged out and must re-enter credentials to log back in.
 
 ## Django Configuration
 
-The Django app is already configured correctly in `views.py`:
+Your Django logout view should redirect to OAuth2-proxy's sign_out endpoint:
 
 ```python
-if settings.IS_PRODUCTION:
-    # Redirects to /oauth2/sign_out?rd=/
-    # OAuth2-proxy will handle the full OIDC logout
+from django.contrib.auth import logout
+from django.shortcuts import redirect
+
+def logout_view(request):
+    """Logout from both Django and Keycloak."""
+    # Clear Django session
+    logout(request)
+    
+    # Redirect to OAuth2-proxy logout, which handles OIDC logout
+    # The 'rd' parameter specifies where to redirect after logout
     return redirect('/oauth2/sign_out?rd=/')
 ```
+
+See [Django Integration Guide](django-integration.md#5-logout-handling) for complete implementation details.
 
 ## Keycloak Client Configuration
 
@@ -241,4 +250,4 @@ sudo docker logs edge_oauth2_proxy 2>&1 | grep -i "end_session\|logout"
 - [OAuth2-proxy OIDC Configuration](https://oauth2-proxy.github.io/oauth2-proxy/configuration/providers/oidc)
 - [OIDC RP-Initiated Logout](https://openid.net/specs/openid-connect-rpinitiated-1_0.html)
 - [Keycloak OIDC Logout](https://www.keycloak.org/docs/latest/securing_apps/#logout)
-- [This Stack's Django Integration](keycloak/DJANGO_INTEGRATION.md#5-logout-handling)
+- [This Stack's Django Integration](django-integration.md#5-logout-handling)

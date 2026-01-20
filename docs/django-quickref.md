@@ -330,6 +330,6 @@ All other paths require authentication!
 
 ## Documentation
 
-- **Detailed Guide**: [keycloak/DJANGO_INTEGRATION.md](keycloak/DJANGO_INTEGRATION.md)
+- **Detailed Guide**: [django-integration.md](django-integration.md)
 - **Django Docs**: https://docs.djangoproject.com/en/stable/howto/auth-remote-user/
 - **OAuth2-proxy**: https://oauth2-proxy.github.io/oauth2-proxy/

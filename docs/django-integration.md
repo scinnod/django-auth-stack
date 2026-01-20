@@ -339,7 +339,7 @@ def logout_view(request):
     Result: Full logout from both Django and Keycloak.
     User must re-enter credentials to log back in.
     
-    See LOGOUT_KEYCLOAK.md for configuration details.
+    See keycloak-logout.md for configuration details.
     """
     # Clear Django session
     logout(request)
@@ -578,7 +578,7 @@ def logout_view(request):
 2. Check Keycloak client settings:
    - \"Valid Post Logout Redirect URIs\" must include your domain: `https://itsm.example.org/*`
 3. Check OAuth2-proxy logs: `sudo docker logs edge_oauth2_proxy --tail 50`
-4. See [LOGOUT_KEYCLOAK.md](../LOGOUT_KEYCLOAK.md) for detailed troubleshooting
+4. See [keycloak-logout.md](keycloak-logout.md) for detailed troubleshooting
 
 ### Problem: CSRF errors on POST requests
 

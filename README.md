@@ -1,5 +1,9 @@
 # Edge-Auth Stack: nginx + Keycloak SSO
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)](https://docs.docker.com/compose/)
+[![Keycloak](https://img.shields.io/badge/Keycloak-23.0-blue)](https://www.keycloak.org/)
+
 Production-ready authentication gateway combining nginx reverse proxy with Keycloak SSO for Django services.
 
 ## 🎯 Features
@@ -105,10 +109,31 @@ sudo docker compose ps
 ### Prerequisites
 
 - Docker & Docker Compose
-- Domain names configured in `/etc/hosts` or DNS:
-  ```
-  127.0.0.1 auth.jade.local itsm.jade.local translation.jade.local
-  ```
+- Domain names configured (see below)
+
+### Configuring Local Domains
+
+For local development, add the domains to your hosts file:
+
+**Linux / macOS:**
+```bash
+# Edit hosts file (requires sudo)
+sudo nano /etc/hosts
+
+# Add this line:
+127.0.0.1 auth.jade.local itsm.jade.local translation.jade.local
+```
+
+**Windows:**
+```powershell
+# Open PowerShell as Administrator, then edit:
+notepad C:\Windows\System32\drivers\etc\hosts
+
+# Add this line:
+127.0.0.1 auth.jade.local itsm.jade.local translation.jade.local
+```
+
+> **Note:** For production, use real domain names with proper DNS records instead of hosts file entries.
 
 ### Environment Variables
 
@@ -419,7 +444,7 @@ REMOTE_USER_HEADER = 'HTTP_X_REMOTE_USER'
 
 For detailed configuration, troubleshooting, and examples:
 
-📖 **[Django Integration Guide](keycloak/DJANGO_INTEGRATION.md)**
+📖 **[Django Integration Guide](docs/django-integration.md)**
 
 Includes:
 - Complete settings.py configuration
@@ -430,7 +455,7 @@ Includes:
 - Security considerations
 - Troubleshooting common issues
 
-📖 **[Logout Configuration Guide](LOGOUT_KEYCLOAK.md)**
+📖 **[Logout Configuration Guide](docs/keycloak-logout.md)**
 
 Details on OIDC RP-Initiated Logout implementation:
 - How full SSO logout works (Django + Keycloak session termination)

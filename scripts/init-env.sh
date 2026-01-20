@@ -1,7 +1,9 @@
 #!/bin/bash
-
 # =============================================================================
 # Environment Initialization Script
+# =============================================================================
+# Copyright (C) 2024-2026 David Kleinhans, Jade University of Applied Sciences
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # =============================================================================
 # This script initializes the .env file with secure random values.
 # - Copies .env.example to .env if it doesn't exist

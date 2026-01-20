@@ -89,7 +89,7 @@ This exports:
 
 - [Keycloak Export/Import Documentation](https://www.keycloak.org/server/importExport)
 - [Keycloak CLI Reference](https://www.keycloak.org/server/configuration)
-- [Client Configuration for Logout](../../LOGOUT_KEYCLOAK.md#keycloak-client-configuration) - Required settings for OIDC logout
+- [Client Configuration for Logout](../../docs/keycloak-logout.md#keycloak-client-configuration) - Required settings for OIDC logout
 
 ## Required Client Configuration
 
@@ -98,7 +98,7 @@ When creating OIDC clients for this stack, ensure these settings are configured:
 ### Critical for Logout
 - **Valid Post Logout Redirect URIs**: `https://your-domain/*`
   - Without this, OIDC logout will fail
-  - See [LOGOUT_KEYCLOAK.md](../../LOGOUT_KEYCLOAK.md) for details
+  - See [keycloak-logout.md](../../docs/keycloak-logout.md) for details
 
 ### Standard Settings
 - **Client Authentication**: ON (confidential clients)
