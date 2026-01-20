@@ -17,16 +17,16 @@
 #   - proxy: public-facing, nginx only (auto-created)
 #   - auth_backend (internal): nginx <-> oauth2-proxy <-> keycloak
 #   - itsm_backend (external): nginx <-> itsm_nginx container
-#   - deepl_backend (external): nginx <-> deepl_nginx container
+#   - translation_backend (external): nginx <-> translation_nginx container
 #   - keycloak_db (internal): keycloak <-> postgres
 #
 # EXTERNAL NETWORKS must be created manually before starting:
 #   docker network create itsm_backend
-#   docker network create deepl_backend
+#   docker network create translation_backend
 #
 # These networks are shared with the upstream application containers.
 # On the itsm_backend network, the itsm_nginx container must be accessible.
-# On the deepl_backend network, the deepl_nginx container must be accessible.
+# On the translation_backend network, the translation_nginx container must be accessible.
 #
 # TLS MODES:
 #   Default: Use provided certificates (mount ./certs/)
@@ -183,7 +183,7 @@ services:
       # Domain configuration (substituted in nginx configs at startup)
       DOMAIN_AUTH: ${DOMAIN_AUTH:-auth.example.org}
       DOMAIN_ITSM: ${DOMAIN_ITSM:-itsm.example.org}
-      DOMAIN_DEEPL: ${DOMAIN_DEEPL:-deepl.example.org}
+      DOMAIN_TRANSLATION: ${DOMAIN_TRANSLATION:-translation.example.org}
       # Keycloak realm for logout URL construction
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-master}
       # Cookie domain for clearing oauth2-proxy session on logout
@@ -220,7 +220,7 @@ services:
       - proxy           # Public-facing
       - auth_backend    # -> oauth2-proxy & keycloak
       - itsm_backend    # -> itsm_nginx:8000
-      - deepl_backend   # -> deepl_nginx:8000
+      - translation_backend   # -> translation_nginx:8000
     depends_on:
       - oauth2-proxy
       - keycloak
@@ -249,8 +249,8 @@ networks:
   itsm_backend:
     external: true
   
-  # External: nginx <-> deepl_nginx container (must be created manually)
-  deepl_backend:
+  # External: nginx <-> translation_nginx container (must be created manually)
+  translation_backend:
     external: true
   
   # Internal: keycloak <-> postgres

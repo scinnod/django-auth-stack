@@ -10,8 +10,8 @@
 # files, images, etc.). Useful for fully secured services where nothing should
 # be publicly accessible.
 #
-# Domain: ${DOMAIN_DEEPL} (e.g., translation.jade.local)
-# Upstream: deepl_nginx:8000 (external Docker container on deepl_backend network)
+# Domain: ${DOMAIN_TRANSLATION} (e.g., translation.jade.local)
+# Upstream: translation_nginx:8000 (external Docker container on translation_backend network)
 #
 # How it works:
 #   1. Every request checked by OAuth2-proxy before reaching Django
@@ -27,7 +27,7 @@
 server {
     listen 80;
     listen [::]:80;
-    server_name ${DOMAIN_DEEPL};
+    server_name ${DOMAIN_TRANSLATION};
     
     # Redirect HTTP -> HTTPS
     location / {
@@ -38,7 +38,7 @@ server {
 server {
     listen 443 ssl;
     listen [::]:443 ssl;
-    server_name ${DOMAIN_DEEPL};
+    server_name ${DOMAIN_TRANSLATION};
 
     # -------------------------------------------------------------------------
     # TLS Configuration
@@ -54,8 +54,8 @@ server {
     # -------------------------------------------------------------------------
     # Logging (with authentication info)
     # -------------------------------------------------------------------------
-    access_log /var/log/nginx/deepl.example.org.access.log auth;
-    error_log /var/log/nginx/deepl.example.org.error.log warn;
+    access_log /var/log/nginx/translation.example.org.access.log auth;
+    error_log /var/log/nginx/translation.example.org.error.log warn;
 
     # -------------------------------------------------------------------------
     # OAuth2 Proxy Integration
@@ -92,6 +92,6 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-Host $host;
         
-        proxy_pass http://deepl_nginx:8000;
+        proxy_pass http://translation_nginx:8000;
     }
 }

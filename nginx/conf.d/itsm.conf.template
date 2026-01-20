@@ -26,7 +26,7 @@
 #   - AUTHENTICATION_BACKENDS = ['django.contrib.auth.backends.RemoteUserBackend', ...]
 #   - MIDDLEWARE includes RemoteUserMiddleware
 #
-# Alternative Pattern: See deepl.conf.template for nginx-level authentication
+# Alternative Pattern: See translation.conf.template for nginx-level authentication
 # (where ALL requests require Keycloak login, including static files)
 # =============================================================================
 

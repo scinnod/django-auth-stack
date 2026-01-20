@@ -17,7 +17,7 @@ set -e
 TEMPLATE_FILES="
 /etc/nginx/conf.d/keycloak.conf.template:/etc/nginx/conf.d/keycloak.conf
 /etc/nginx/conf.d/itsm.conf.template:/etc/nginx/conf.d/itsm.conf
-/etc/nginx/conf.d/deepl.conf.template:/etc/nginx/conf.d/deepl.conf
+/etc/nginx/conf.d/translation.conf.template:/etc/nginx/conf.d/translation.conf
 "
 
 echo "[nginx-entrypoint] Substituting environment variables in nginx configs..."
@@ -32,7 +32,7 @@ echo "$TEMPLATE_FILES" | while IFS=: read -r template output; do
         
         # Substitute environment variables
         # Only substitute variables that are actually set
-        envsubst '${DOMAIN_AUTH} ${DOMAIN_ITSM} ${DOMAIN_DEEPL} ${KEYCLOAK_REALM} ${OAUTH2_PROXY_COOKIE_DOMAIN} ${OAUTH2_PROXY_CLIENT_ID}' < "$template" > "$output"
+        envsubst '${DOMAIN_AUTH} ${DOMAIN_ITSM} ${DOMAIN_TRANSLATION} ${KEYCLOAK_REALM} ${OAUTH2_PROXY_COOKIE_DOMAIN} ${OAUTH2_PROXY_CLIENT_ID}' < "$template" > "$output"
         
         echo "[nginx-entrypoint] Created: $output"
     else

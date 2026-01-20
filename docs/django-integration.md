@@ -24,7 +24,7 @@ This stack provides **two scaffold configurations** for different use cases:
 
 **nginx config:** `itsm.conf.template`
 
-### Pattern B: Full nginx-Level Authentication (DeepL service)
+### Pattern B: Full nginx-Level Authentication (Translation service)
 
 **When to use:** Everything should be protected, no public pages.
 
@@ -35,7 +35,7 @@ This stack provides **two scaffold configurations** for different use cases:
 - Simple, secure, no public access whatsoever
 - **Example:** Internal tools, admin dashboards, confidential services
 
-**nginx config:** `deepl.conf.template`
+**nginx config:** `translation.conf.template`
 
 ---
 
@@ -151,7 +151,7 @@ def dashboard(request):
 
 ## Pattern B: Full nginx-Level Authentication
 
-For services where everything should be protected (e.g., DeepL translation service).
+For services where everything should be protected (e.g., translation service).
 
 ### Django Configuration (Pattern B)
 

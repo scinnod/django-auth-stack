@@ -158,7 +158,7 @@ log_warn "For production: use actual domains (e.g., .example.com)"
 echo ""
 read -p "Auth domain [auth.example.local]: " domain_auth
 read -p "ITSM domain [itsm.example.local]: " domain_itsm
-read -p "DeepL/Translation domain [translation.example.local]: " domain_deepl
+read -p "Translation domain [translation.example.local]: " domain_translation
 
 if [ -n "$domain_auth" ]; then
     $SED_INPLACE "s|DOMAIN_AUTH=auth.example.local|DOMAIN_AUTH=${domain_auth}|g" .env
@@ -178,9 +178,9 @@ if [ -n "$domain_itsm" ]; then
     log_info "Set DOMAIN_ITSM to ${domain_itsm}"
 fi
 
-if [ -n "$domain_deepl" ]; then
-    $SED_INPLACE "s|DOMAIN_DEEPL=translation.example.local|DOMAIN_DEEPL=${domain_deepl}|g" .env
-    log_info "Set DOMAIN_DEEPL to ${domain_deepl}"
+if [ -n "$domain_translation" ]; then
+    $SED_INPLACE "s|DOMAIN_TRANSLATION=translation.example.local|DOMAIN_TRANSLATION=${domain_translation}|g" .env
+    log_info "Set DOMAIN_TRANSLATION to ${domain_translation}"
 fi
 
 
@@ -211,7 +211,7 @@ log_info "     nano .env"
 echo ""
 log_info "2. Create Docker networks:"
 log_info "     docker network create itsm_backend"
-log_info "     docker network create deepl_backend"
+log_info "     docker network create translation_backend"
 echo ""
 log_info "3. Start the stack and access Keycloak:"
 log_info "     docker compose up -d"

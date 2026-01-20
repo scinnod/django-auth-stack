@@ -33,7 +33,7 @@ fi
 DOMAINS=(
     "${DOMAIN_AUTH:-auth.example.org}"
     "${DOMAIN_ITSM:-itsm.example.org}"
-    "${DOMAIN_DEEPL:-deepl.example.org}"
+    "${DOMAIN_TRANSLATION:-translation.example.org}"
 )
 EMAIL="${LETSENCRYPT_EMAIL:-admin@example.org}"  # From .env or default
 STAGING=0  # Set to 1 for testing (avoids rate limits)

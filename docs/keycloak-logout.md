@@ -131,14 +131,14 @@ For each OIDC client in Keycloak, configure the following:
    ```
    https://${DOMAIN_AUTH}/oauth2/callback
    https://${DOMAIN_ITSM}/*
-   https://${DOMAIN_DEEPL}/*
+   https://${DOMAIN_TRANSLATION}/*
    ```
    Replace with your actual domains from `.env`
 
 4. **Valid Post Logout Redirect URIs**: 
    ```
    https://${DOMAIN_ITSM}/*
-   https://${DOMAIN_DEEPL}/*
+   https://${DOMAIN_TRANSLATION}/*
    https://${DOMAIN_AUTH}/*
    ```
    **⚠️ CRITICAL**: Without these URIs configured, **logout will fail** with "Invalid redirect URI" error.
@@ -149,7 +149,7 @@ For each OIDC client in Keycloak, configure the following:
    3. Find **Valid post logout redirect URIs** field
    4. Add each domain where users can be redirected after logout:
       - `https://itsm.example.org/*`
-      - `https://deepl.example.org/*` (if using DeepL)
+      - `https://translation.example.org/*` (if using Translation service)
       - Or use `*` to allow any redirect (less secure)
    5. Click **Save**
 
@@ -307,7 +307,7 @@ sudo docker logs edge_oauth2_proxy 2>&1 | grep -i "end_session\|logout"
 ⚠️ **Important**: When using OIDC RP-Initiated Logout, logging out of one application will terminate the **entire Keycloak SSO session**.
 
 **This means**:
-- User logs out of ITSM → Also logged out of DeepL (and any other apps in the same realm)
+- User logs out of ITSM → Also logged out of Translation (and any other apps in the same realm)
 - This is standard SSO behavior (true single sign-on)
 
 **If you need independent logout**:

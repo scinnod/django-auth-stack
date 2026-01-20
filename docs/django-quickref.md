@@ -12,7 +12,7 @@ This stack provides **two scaffold configurations**:
 | Pattern | Use Case | nginx Config | Public Pages? |
 |---------|----------|--------------|---------------|
 | **A: Django-Controlled** | Public + protected pages | `itsm.conf.template` | ✅ Yes |
-| **B: Full nginx Auth** | Everything protected | `deepl.conf.template` | ❌ No |
+| **B: Full nginx Auth** | Everything protected | `translation.conf.template` | ❌ No |
 
 ---
 
@@ -70,7 +70,7 @@ def dashboard(request):
 
 ---
 
-## Pattern B: Full nginx Auth (DeepL)
+## Pattern B: Full nginx Auth (Translation)
 
 ✅ Everything protected (including static files)  
 ✅ Simpler Django setup  
