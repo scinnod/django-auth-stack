@@ -426,9 +426,18 @@ Includes:
 - @login_required decorator usage
 - **Django i18n_patterns support** (works seamlessly with `/de/admin/`, `/en/admin/`, etc.)
 - Auto-creating users from Keycloak
-- Logout handling
+- Logout handling (full OIDC logout)
 - Security considerations
 - Troubleshooting common issues
+
+📖 **[Logout Configuration Guide](LOGOUT_KEYCLOAK.md)**
+
+Details on OIDC RP-Initiated Logout implementation:
+- How full SSO logout works (Django + Keycloak session termination)
+- OAuth2-proxy configuration (already implemented)
+- Keycloak client setup requirements
+- Testing and troubleshooting
+- Security vs convenience trade-offs
 
 ---
 

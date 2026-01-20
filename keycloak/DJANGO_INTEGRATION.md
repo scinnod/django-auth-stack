@@ -326,19 +326,27 @@ from django.shortcuts import redirect
 
 def logout_view(request):
     """
-    Logout from both Django and Keycloak.
+    Logout from both Django and Keycloak (full OIDC logout).
     
-    Two-step logout:
-    1. Clear Django session
-    2. Redirect to OAuth2-proxy logout endpoint
-    3. OAuth2-proxy clears its cookie
-    4. Optionally redirect to Keycloak logout (not configured by default)
+    This stack is configured for OIDC RP-Initiated Logout:
+    1. Clear Django session (logout)
+    2. Redirect to /oauth2/sign_out?rd=/
+    3. OAuth2-proxy automatically clears its cookie
+    4. OAuth2-proxy redirects to Keycloak's end_session_endpoint
+    5. Keycloak terminates the SSO session
+    6. User is redirected back to homepage
+    
+    Result: Full logout from both Django and Keycloak.
+    User must re-enter credentials to log back in.
+    
+    See LOGOUT_KEYCLOAK.md for configuration details.
     """
     # Clear Django session
     logout(request)
     
-    # Redirect to OAuth2-proxy logout, which clears the auth cookie
-    # Then redirect back to homepage
+    # Redirect to OAuth2-proxy logout endpoint
+    # OAuth2-proxy will handle the full OIDC logout flow
+    # The 'rd' parameter specifies where to redirect after logout
     return redirect('/oauth2/sign_out?rd=/')
 ```
 
@@ -546,22 +554,31 @@ python manage.py shell
 ['django.contrib.auth.backends.RemoteUserBackend', ...]
 ```
 
-### Problem: Logout doesn't work
+### Problem: Logout doesn't work (still auto-logged in)
 
 **Diagnosis:**
-After logout, user still authenticated on next request.
+After logout, user can immediately access protected pages without re-entering credentials.
 
 **Possible Causes:**
-1. Only clearing Django session, not OAuth2-proxy cookie
-2. Browser cache
+1. Keycloak SSO session still active (OIDC logout not working)
+2. OAuth2-proxy cookie not cleared
+3. Browser cache
+4. Keycloak client missing \"Valid Post Logout Redirect URIs\"
 
 **Solution:**
 ```python
 # Logout view must redirect to OAuth2-proxy logout endpoint
 def logout_view(request):
     logout(request)  # Clear Django session
-    return redirect('/oauth2/sign_out?rd=/')  # Clear OAuth2-proxy cookie
+    return redirect('/oauth2/sign_out?rd=/')  # Triggers full OIDC logout
 ```
+
+**Additional checks:**
+1. Verify OAuth2-proxy configuration includes `--pass-user-headers=true` (already in docker-compose.yml)
+2. Check Keycloak client settings:
+   - \"Valid Post Logout Redirect URIs\" must include your domain: `https://itsm.example.org/*`
+3. Check OAuth2-proxy logs: `sudo docker logs edge_oauth2_proxy --tail 50`
+4. See [LOGOUT_KEYCLOAK.md](../LOGOUT_KEYCLOAK.md) for detailed troubleshooting
 
 ### Problem: CSRF errors on POST requests
 
