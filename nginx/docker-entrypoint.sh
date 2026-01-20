@@ -29,7 +29,7 @@ echo "$TEMPLATE_FILES" | while IFS=: read -r template output; do
         
         # Substitute environment variables
         # Only substitute variables that are actually set
-        envsubst '${DOMAIN_AUTH} ${DOMAIN_ITSM} ${DOMAIN_DEEPL}' < "$template" > "$output"
+        envsubst '${DOMAIN_AUTH} ${DOMAIN_ITSM} ${DOMAIN_DEEPL} ${KEYCLOAK_REALM} ${OAUTH2_PROXY_COOKIE_DOMAIN} ${OAUTH2_PROXY_CLIENT_ID}' < "$template" > "$output"
         
         echo "[nginx-entrypoint] Created: $output"
     else

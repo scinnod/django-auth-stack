@@ -459,10 +459,10 @@ Includes:
 
 Details on OIDC RP-Initiated Logout implementation:
 - How full SSO logout works (Django + Keycloak session termination)
-- OAuth2-proxy configuration (already implemented)
-- Keycloak client setup requirements
+- Nginx-based logout handling (oauth2-proxy v7.6.0 workaround)
+- Required Keycloak client settings (Valid Post Logout Redirect URIs)
+- Audience mapper configuration for `keycloak-oidc` provider
 - Testing and troubleshooting
-- Security vs convenience trade-offs
 
 ---
 

@@ -121,7 +121,7 @@ server {
         proxy_buffering off;
         proxy_http_version 1.1;
     }
-    
+
     # -------------------------------------------------------------------------
     # ALL OTHER PATHS - Public by default, Django controls authorization
     # -------------------------------------------------------------------------
@@ -144,6 +144,32 @@ server {
     # -------------------------------------------------------------------------
     # OAuth2 Proxy Integration
     # -------------------------------------------------------------------------
+    # Sign-out: nginx handles full SSO logout (oauth2-proxy v7.6.0 doesn't do OIDC logout)
+    #
+    # Problem: oauth2-proxy only clears its cookie, doesn't redirect to Keycloak
+    # Solution: nginx clears cookie AND redirects to Keycloak's end_session_endpoint
+    #
+    # Flow:
+    #   1. User hits /oauth2/sign_out (or Django logout redirects here)
+    #   2. nginx clears the _oauth2_proxy cookie
+    #   3. nginx redirects to Keycloak's end_session_endpoint
+    #   4. Keycloak terminates the SSO session
+    #   5. Keycloak redirects to post_logout_redirect_uri (back to our app)
+    #
+    # Note: Without id_token_hint, Keycloak shows a logout confirmation page.
+    #       This is acceptable and secure - user confirms logout.
+    #
+    location = /oauth2/sign_out {
+        # Clear the oauth2-proxy cookie
+        add_header Set-Cookie "_oauth2_proxy=; Path=/; Domain=${OAUTH2_PROXY_COOKIE_DOMAIN}; HttpOnly; Secure; SameSite=Lax; Max-Age=0" always;
+        
+        # Redirect to Keycloak's end_session_endpoint
+        # post_logout_redirect_uri tells Keycloak where to send user after logout
+        # This URI must be configured in Keycloak client's "Valid post logout redirect URIs"
+        return 302 https://${DOMAIN_AUTH}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/logout?post_logout_redirect_uri=https://${DOMAIN_ITSM}/&client_id=${OAUTH2_PROXY_CLIENT_ID};
+    }
+    
+    # All other OAuth2 endpoints (auth, start, callback) go to oauth2-proxy
     location /oauth2/ {
         proxy_pass http://edge_oauth2_proxy:4180;
         proxy_set_header Host $host;

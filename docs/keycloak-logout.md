@@ -9,24 +9,38 @@ This prevents users from immediately re-logging in with a single click after log
 
 ## How It Works
 
-## OAuth2-proxy Configuration
+## Nginx-Based OIDC Logout (OAuth2-proxy v7.6.0)
 
-### Implementation Status
+### The Challenge
 
-✅ **OIDC logout is already configured** in this stack's `docker-compose.yml`.
+OAuth2-proxy v7.6.0 does **not** implement OIDC RP-Initiated Logout. When you
+call `/oauth2/sign_out`, it only:
+1. Clears the oauth2-proxy cookie
+2. Redirects to the `rd` parameter
 
-The OAuth2-proxy service includes all required parameters for OIDC RP-Initiated Logout:
+It does **not** redirect to Keycloak's `end_session_endpoint`, so the Keycloak
+session persists. Users get re-authenticated automatically without entering
+credentials again.
 
-```yaml
-# Key parameters for OIDC logout (from docker-compose.yml):
---provider=oidc
---oidc-issuer-url=http://keycloak:8080/realms/${KEYCLOAK_REALM}
---redirect-url=https://${DOMAIN_AUTH}/oauth2/callback
---pass-user-headers=true          # Required for Django integration
---set-xauthrequest=true            # Required for nginx auth_request
---skip-provider-button=true        # Direct to Keycloak login
---whitelist-domain=${OAUTH2_PROXY_COOKIE_DOMAIN}  # Enables logout redirects
+### Our Solution: Nginx-Handled Logout
+
+Instead of relying on oauth2-proxy, nginx handles the full logout flow:
+
+```nginx
+location = /oauth2/sign_out {
+    # Clear the oauth2-proxy cookie
+    add_header Set-Cookie "_oauth2_proxy=; Path=/; Domain=${OAUTH2_PROXY_COOKIE_DOMAIN}; HttpOnly; Secure; SameSite=Lax; Max-Age=0" always;
+    
+    # Redirect to Keycloak's end_session_endpoint
+    return 302 https://${DOMAIN_AUTH}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/logout?post_logout_redirect_uri=https://${DOMAIN_ITSM}/&client_id=${OAUTH2_PROXY_CLIENT_ID};
+}
 ```
+
+This approach:
+- ✅ nginx clears the oauth2-proxy session cookie
+- ✅ nginx redirects to Keycloak's external logout URL
+- ✅ Keycloak terminates the SSO session
+- ⚠️ Without `id_token_hint`, Keycloak shows a logout confirmation page (secure and expected)
 
 ### Required Environment Variables
 
@@ -42,40 +56,61 @@ OAUTH2_PROXY_CLIENT_SECRET=your-secret    # From Keycloak client config
 
 ### OIDC Logout Flow
 
-When a user visits `/oauth2/sign_out?rd=/`, the following happens:
+When a user visits `/oauth2/sign_out`, the following happens:
 
 1. **Django logout view** clears the Django session
-2. **Django** redirects to `/oauth2/sign_out?rd=/`
-3. **OAuth2-proxy** clears its own session cookie
-4. **OAuth2-proxy** redirects to Keycloak's `end_session_endpoint` with:
-   - `id_token_hint` - the user's ID token
-   - `post_logout_redirect_uri` - where to redirect after logout (from `rd` parameter)
-5. **Keycloak** terminates the user's SSO session
-6. **Keycloak** redirects back to the `post_logout_redirect_uri` (typically `/`)
+2. **Django** redirects to `/oauth2/sign_out`
+3. **nginx** clears the oauth2-proxy cookie (`_oauth2_proxy`)
+4. **nginx** redirects (302) to Keycloak's `end_session_endpoint` with:
+   - `client_id` - identifies the application
+   - `post_logout_redirect_uri` - where to redirect after logout
+5. **Keycloak** shows logout confirmation (because no `id_token_hint`)
+6. **User clicks "Logout"** on Keycloak page
+7. **Keycloak** terminates the SSO session
+8. **Keycloak** redirects back to `post_logout_redirect_uri`
 
 Result: User is fully logged out and must re-enter credentials to log back in.
 
+### Note on Logout Confirmation
+
+Without `id_token_hint`, Keycloak displays a confirmation page asking the user
+to confirm logout. This is **intentional security behavior** - it prevents
+logout CSRF attacks. Users simply click "Logout" to complete the process.
+
 ## Django Configuration
 
-Your Django logout view should redirect to OAuth2-proxy's sign_out endpoint:
+Your Django logout view should redirect to the nginx-handled sign_out endpoint:
 
 ```python
 from django.contrib.auth import logout
 from django.shortcuts import redirect
 
 def logout_view(request):
-    """Logout from both Django and Keycloak."""
+    """Logout from both Django and Keycloak SSO."""
     # Clear Django session
     logout(request)
     
-    # Redirect to OAuth2-proxy logout, which handles OIDC logout
-    # The 'rd' parameter specifies where to redirect after logout
-    return redirect('/oauth2/sign_out?rd=/')
+    # Redirect to nginx sign_out endpoint
+    # nginx clears oauth2-proxy cookie and redirects to Keycloak logout
+    return redirect('/oauth2/sign_out')
 ```
+
+**Note**: The `rd` parameter is no longer needed - nginx handles the redirect to Keycloak
+and the `post_logout_redirect_uri` is configured in the nginx template.
 
 See [Django Integration Guide](django-integration.md#5-logout-handling) for complete implementation details.
 
 ## Keycloak Client Configuration
+
+### Quick Checklist
+
+Before testing logout, ensure you've configured in Keycloak Admin Console:
+
+- [ ] ✅ **Valid Post Logout Redirect URIs** - `https://your-domain/*` (see detailed steps below)
+- [ ] ✅ **Audience Mapper** - Add client ID to `aud` claim (see detailed steps below)
+- [ ] ✅ **Valid Redirect URIs** - Include `https://auth.domain/oauth2/callback`
+
+**Without these, logout will fail or login will break.**
 
 ### Required Settings
 
@@ -101,9 +136,50 @@ For each OIDC client in Keycloak, configure the following:
    https://${DOMAIN_DEEPL}/*
    https://${DOMAIN_AUTH}/*
    ```
-   **Critical**: Without these, logout redirects will fail
+   **⚠️ CRITICAL**: Without these URIs configured, **logout will fail** with "Invalid redirect URI" error.
+   
+   **Steps to configure:**
+   1. Go to Keycloak Admin Console → Your Realm → Clients → Your Client
+   2. Scroll down to **Login settings** section
+   3. Find **Valid post logout redirect URIs** field
+   4. Add each domain where users can be redirected after logout:
+      - `https://itsm.example.org/*`
+      - `https://deepl.example.org/*` (if using DeepL)
+      - Or use `*` to allow any redirect (less secure)
+   5. Click **Save**
 
 5. **Web Origins**: `+` (allows all valid redirect URIs)
+
+### Required: Audience Mapper (for keycloak-oidc provider)
+
+OAuth2-proxy with `--provider=keycloak-oidc` requires the client ID to be included
+in the `aud` (audience) claim of the JWT token. Keycloak doesn't do this by default.
+
+**Steps to add the audience mapper:**
+
+1. Go to Keycloak Admin Console → Your Realm → Clients → Your Client
+2. Click the **Client scopes** tab
+3. Click on `<your-client-id>-dedicated` (e.g., `oauth2-proxy-dedicated`)
+4. Click **Configure a new mapper** (or **Add mapper** → **By configuration**)
+5. Select **Audience**
+6. Configure:
+   - **Name**: `audience-mapper` (or any descriptive name)
+   - **Included Client Audience**: Select your client (e.g., `oauth2-proxy`)
+   - **Add to ID token**: ON
+   - **Add to access token**: ON
+7. Click **Save**
+
+**Verification**: After adding the mapper, you can test by:
+1. Go to Clients → Your Client → Client scopes → Evaluate
+2. Select a test user
+3. Click **Generated ID token** or **Generated access token**
+4. Verify the `aud` claim includes your client ID:
+   ```json
+   {
+     "aud": ["oauth2-proxy", "account"],
+     ...
+   }
+   ```
 
 ### Example for ITSM Client
 

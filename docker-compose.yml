@@ -128,8 +128,11 @@ services:
       - --cookie-secure=true
       - --cookie-domain=${OAUTH2_PROXY_COOKIE_DOMAIN:-.example.org}
       - --whitelist-domain=${OAUTH2_PROXY_COOKIE_DOMAIN:-.example.org}
-      - --provider=oidc
+      # Dedicated Keycloak OIDC provider (requires audience mapper in Keycloak)
+      # See docs/keycloak-logout.md for required Keycloak configuration
+      - --provider=keycloak-oidc
       - --provider-display-name=Keycloak
+      # Internal URL for oauth2-proxy <-> Keycloak communication
       - --oidc-issuer-url=http://keycloak:8080/realms/${KEYCLOAK_REALM:-master}
       - --redirect-url=https://${DOMAIN_AUTH:-auth.example.org}/oauth2/callback
       - --reverse-proxy=true
@@ -143,6 +146,8 @@ services:
       - --ssl-insecure-skip-verify=true
       - --skip-claims-from-profile-url=true
       - --insecure-oidc-allow-unverified-email=true
+      # Use PKCE for enhanced security (recommended for Keycloak)
+      - --code-challenge-method=S256
     environment:
       OAUTH2_PROXY_CLIENT_ID: ${OAUTH2_PROXY_CLIENT_ID:?OAUTH2_PROXY_CLIENT_ID must be set}
       OAUTH2_PROXY_CLIENT_SECRET: ${OAUTH2_PROXY_CLIENT_SECRET:?OAUTH2_PROXY_CLIENT_SECRET must be set}
@@ -170,6 +175,12 @@ services:
       DOMAIN_AUTH: ${DOMAIN_AUTH:-auth.example.org}
       DOMAIN_ITSM: ${DOMAIN_ITSM:-itsm.example.org}
       DOMAIN_DEEPL: ${DOMAIN_DEEPL:-deepl.example.org}
+      # Keycloak realm for logout URL construction
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-master}
+      # Cookie domain for clearing oauth2-proxy session on logout
+      OAUTH2_PROXY_COOKIE_DOMAIN: ${OAUTH2_PROXY_COOKIE_DOMAIN:-.example.org}
+      # OAuth2 client ID for Keycloak logout redirect
+      OAUTH2_PROXY_CLIENT_ID: ${OAUTH2_PROXY_CLIENT_ID:-oauth2-proxy}
     ports:
       - "80:80"
       - "443:443"
