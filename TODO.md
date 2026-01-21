@@ -14,21 +14,16 @@ SPDX-License-Identifier: Apache-2.0
 - [x] **License headers** - Updated all SPDX headers from AGPL-3.0-or-later to Apache-2.0
 - [x] **Documentation** - Restructured into docs/ folder with consistent naming
 - [x] **README** - Updated license badge and license section to Apache-2.0
-
-## License Conversion Verification TODOs
-
-- [ ] **TODO: Verify third-party licenses** - Confirm all third-party component licenses in NOTICE file are accurate and up-to-date
-- [ ] **TODO: Missing SPDX headers** - Check if any new files need SPDX-License-Identifier: Apache-2.0 headers
-- [ ] **TODO: License references in configs** - Verify no AGPL references remain in configuration files, comments, or deployment scripts
-- [ ] **TODO: Documentation license updates** - Ensure all documentation files reference Apache-2.0 correctly
-- [ ] **TODO: Review NOTICE file** - Annually review and update third-party component versions and licenses
-- [ ] **TODO: Verify compliance** - Ensure all dependencies are compatible with Apache-2.0 licensing
+- [x] **Third-party licenses** - Docker images pulled by users don't require licensing attribution
+- [x] **SPDX headers** - All shipped files have proper Apache-2.0 headers
+- [x] **Author information** - Updated with full affiliation and contact email
 
 ## Before Publishing
 
-- [ ] **Update .env.example** `LETSENCRYPT_EMAIL` from `admin@example.com` to your email
+- [ ] **Update .env.example** - Ensure `LETSENCRYPT_EMAIL` is set to `admin@example.com` (users will customize)
 - [ ] **Verify no secrets** committed (see Security Verification below)
 - [ ] **Git add and commit** the new/changed files
+- [ ] **Final review** - Review all files one more time before publishing
 
 ## Domain Names
 

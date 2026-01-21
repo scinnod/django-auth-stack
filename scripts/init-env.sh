@@ -5,8 +5,6 @@
 # Copyright (C) 2024-2026 David Kleinhans, Jade University of Applied Sciences
 # SPDX-License-Identifier: Apache-2.0
 # =============================================================================
-# TODO: Verify SPDX headers are present in all newly created scripts
-# =============================================================================
 # This script initializes the .env file with secure random values.
 # - Copies .env.example to .env if it doesn't exist
 # - Generates secure random passwords and keys
