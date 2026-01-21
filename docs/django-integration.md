@@ -180,6 +180,7 @@ REMOTE_USER_HEADER = 'HTTP_X_REMOTE_USER'
 - No SSO login view needed
 - `@login_required` still works, but users are already authenticated
 - Simpler setup, but no public pages
+- **Logout works the same way** - redirect to `/oauth2/sign_out` (see [Logout Handling](#5-logout-handling))
 
 ---
 
@@ -325,6 +326,8 @@ urlpatterns = i18n_patterns(
 
 ### 5. Logout Handling
 
+Logout handling works **identically for both Pattern A and Pattern B**. Both `itsm.conf.template` and `translation.conf.template` implement nginx-based OIDC logout.
+
 ```python
 from django.contrib.auth import logout
 from django.shortcuts import redirect
@@ -332,12 +335,13 @@ from django.shortcuts import redirect
 def logout_view(request):
     """
     Logout from both Django and Keycloak (full OIDC logout).
+    Works for both Pattern A (Django-Controlled) and Pattern B (Full nginx-Level).
     
     This stack is configured for OIDC RP-Initiated Logout:
     1. Clear Django session (logout)
-    2. Redirect to /oauth2/sign_out?rd=/
-    3. OAuth2-proxy automatically clears its cookie
-    4. OAuth2-proxy redirects to Keycloak's end_session_endpoint
+    2. Redirect to /oauth2/sign_out
+    3. nginx clears the oauth2-proxy cookie
+    4. nginx redirects to Keycloak's end_session_endpoint
     5. Keycloak terminates the SSO session
     6. User is redirected back to homepage
     
@@ -349,10 +353,10 @@ def logout_view(request):
     # Clear Django session
     logout(request)
     
-    # Redirect to OAuth2-proxy logout endpoint
-    # OAuth2-proxy will handle the full OIDC logout flow
-    # The 'rd' parameter specifies where to redirect after logout
-    return redirect('/oauth2/sign_out?rd=/')
+    # Redirect to nginx-handled sign_out endpoint
+    # nginx clears oauth2-proxy cookie and redirects to Keycloak logout
+    # Note: The 'rd' parameter is no longer needed - nginx handles the redirect
+    return redirect('/oauth2/sign_out')
 ```
 
 ### 6. Custom User Model (Optional)
@@ -572,17 +576,19 @@ After logout, user can immediately access protected pages without re-entering cr
 
 **Solution:**
 ```python
-# Logout view must redirect to OAuth2-proxy logout endpoint
+# Logout view must redirect to nginx-handled sign_out endpoint
 def logout_view(request):
     logout(request)  # Clear Django session
-    return redirect('/oauth2/sign_out?rd=/')  # Triggers full OIDC logout
+    return redirect('/oauth2/sign_out')  # Triggers full OIDC logout via nginx
 ```
 
 **Additional checks:**
 1. Verify OAuth2-proxy configuration includes `--pass-user-headers=true` (already in docker-compose.yml)
 2. Check Keycloak client settings:
-   - \"Valid Post Logout Redirect URIs\" must include your domain: `https://itsm.example.org/*`
-3. Check OAuth2-proxy logs: `sudo docker logs edge_oauth2_proxy --tail 50`
+   - \"Valid Post Logout Redirect URIs\" must include your domains:
+     - `https://itsm.example.org/*`
+     - `https://translation.example.org/*`
+3. Check nginx logs: `sudo docker logs edge_nginx --tail 50`
 4. See [keycloak-logout.md](keycloak-logout.md) for detailed troubleshooting
 
 ### Problem: CSRF errors on POST requests

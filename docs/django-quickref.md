@@ -209,9 +209,11 @@ def logout_view(request):
     # Logout from Django
     logout(request)
     
-    # Redirect to OAuth2-proxy logout (clears Keycloak session)
-    return redirect('/oauth2/sign_out?rd=/')
+    # Redirect to nginx-handled sign_out (clears oauth2-proxy cookie + Keycloak session)
+    return redirect('/oauth2/sign_out')
 ```
+
+> **Note:** nginx handles the full logout flow, clearing the oauth2-proxy cookie and redirecting to Keycloak's end_session_endpoint. No `rd` parameter needed.
 
 ## Custom User Creation
 
@@ -304,12 +306,16 @@ curl -H "Cookie: _oauth2_proxy=..." https://itsm.jade.local/protected/
 2. Have you run migrations? (`python manage.py migrate`)
 
 ### Problem: Logout doesn't work
-**Solution:** Redirect to OAuth2-proxy logout endpoint
+**Solution:** Redirect to nginx-handled sign_out endpoint
 ```python
 def logout_view(request):
     logout(request)
-    return redirect('/oauth2/sign_out?rd=/')  # Important!
+    return redirect('/oauth2/sign_out')  # nginx handles full OIDC logout
 ```
+
+**Additional checks:**
+- Verify Keycloak client has "Valid Post Logout Redirect URIs" configured
+- Check nginx logs: `sudo docker logs edge_nginx --tail 50`
 
 ## What Happens Under the Hood
 

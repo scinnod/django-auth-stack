@@ -29,14 +29,17 @@ credentials again.
 
 ### Our Solution: Nginx-Handled Logout
 
-Instead of relying on oauth2-proxy, nginx handles the full logout flow:
+Instead of relying on oauth2-proxy, nginx handles the full logout flow. This is configured in both `itsm.conf.template` and `translation.conf.template`:
 
 ```nginx
+# Example from itsm.conf.template (translation.conf.template uses DOMAIN_TRANSLATION)
 location = /oauth2/sign_out {
     # Clear the oauth2-proxy cookie
     add_header Set-Cookie "_oauth2_proxy=; Path=/; Domain=${OAUTH2_PROXY_COOKIE_DOMAIN}; HttpOnly; Secure; SameSite=Lax; Max-Age=0" always;
     
     # Redirect to Keycloak's end_session_endpoint
+    # For ITSM: post_logout_redirect_uri=https://${DOMAIN_ITSM}/
+    # For Translation: post_logout_redirect_uri=https://${DOMAIN_TRANSLATION}/
     return 302 https://${DOMAIN_AUTH}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/logout?post_logout_redirect_uri=https://${DOMAIN_ITSM}/&client_id=${OAUTH2_PROXY_CLIENT_ID};
 }
 ```
@@ -61,20 +64,22 @@ OAUTH2_PROXY_CLIENT_SECRET=your-secret    # From Keycloak client config
 
 ### OIDC Logout Flow
 
-When a user visits `/oauth2/sign_out`, the following happens:
+When a user visits `/oauth2/sign_out` (on either ITSM or Translation service), the following happens:
 
 1. **Django logout view** clears the Django session
 2. **Django** redirects to `/oauth2/sign_out`
 3. **nginx** clears the oauth2-proxy cookie (`_oauth2_proxy`)
 4. **nginx** redirects (302) to Keycloak's `end_session_endpoint` with:
    - `client_id` - identifies the application
-   - `post_logout_redirect_uri` - where to redirect after logout
+   - `post_logout_redirect_uri` - where to redirect after logout (service-specific)
 5. **Keycloak** shows logout confirmation (because no `id_token_hint`)
 6. **User clicks "Logout"** on Keycloak page
 7. **Keycloak** terminates the SSO session
-8. **Keycloak** redirects back to `post_logout_redirect_uri`
+8. **Keycloak** redirects back to `post_logout_redirect_uri` (ITSM or Translation homepage)
 
 Result: User is fully logged out and must re-enter credentials to log back in.
+
+**Note:** This flow is identical for both authentication patterns (Django-Controlled and Full nginx-Level). The only difference is the `post_logout_redirect_uri` which points to the respective service's homepage.
 
 ### Note on Logout Confirmation
 
@@ -212,8 +217,9 @@ Then configure:
    - After login, you're redirected back to the protected page
 
 2. **Click "Logout" in Django**
-   - This should redirect to `/oauth2/sign_out?rd=/`
-   - You should briefly see a Keycloak logout page (or redirect immediately)
+   - This should redirect to `/oauth2/sign_out`
+   - nginx clears the oauth2-proxy cookie and redirects to Keycloak
+   - Keycloak shows a logout confirmation page (click "Logout")
    - You should end up at the homepage (`/`)
 
 3. **Verify full logout**
@@ -282,9 +288,11 @@ sudo docker logs edge_oauth2_proxy 2>&1 | grep -i "end_session\|logout"
 **Symptoms**: Keycloak shows error: "Invalid parameter: redirect_uri"
 
 **Solutions**:
-1. Add your domain to Keycloak client's "Valid Post Logout Redirect URIs"
-2. Use wildcards: `https://itsm.example.org/*`
-3. Ensure the `rd` parameter in `/oauth2/sign_out?rd=/` points to a valid URI
+1. Add your domain to Keycloak client's "Valid Post Logout Redirect URIs":
+   - `https://itsm.example.org/*`
+   - `https://translation.example.org/*`
+2. Use wildcards as shown above
+3. Verify the `post_logout_redirect_uri` in the nginx template matches a configured URI
 
 ### Issue: Can't log back in after logout
 
@@ -313,8 +321,8 @@ sudo docker logs edge_oauth2_proxy 2>&1 | grep -i "end_session\|logout"
 **If you need independent logout**:
 - Use separate Keycloak realms for each application
 - Or only clear Django + OAuth2-proxy sessions (remove Keycloak logout)
-  - Change Django view to: `return redirect('/oauth2/sign_out?rd=/')` (already implemented)
-  - Remove `--whitelist-domain` from OAuth2-proxy (partial logout only)
+  - Modify the nginx `/oauth2/sign_out` location to only clear the cookie without redirecting to Keycloak
+  - Example: Change `return 302 https://...` to `return 302 /` after clearing the cookie
 
 ### Security vs Convenience Trade-off
 
