@@ -88,20 +88,57 @@ cp .env.example .env
 # Edit .env with your values
 ```
 
-### 3. Start Services
+### 3. Generate or Place TLS Certificates
 
+> ⚠️ **IMPORTANT:** Certificates MUST exist before starting Docker services!
+> If Docker starts first, it creates empty root-owned directories that complicate setup.
+
+**Option A: Self-signed certificates (development)**
 ```bash
-# Stop any existing services
-sudo docker compose down -v
+./scripts/init-selfsigned.sh
+```
+This generates both certificates AND DH parameters in `certs/`.
 
-# Start Keycloak stack
-sudo docker compose up -d
+**Option B: Your own certificates (production)**
+```bash
+# Place your certificates in certs/
+certs/
+├── fullchain.pem   # Full certificate chain
+├── privkey.pem     # Private key
+└── dhparam.pem     # DH parameters (generate if missing)
 
-# Check status
-sudo docker compose ps
+# Generate DH parameters if you don't have them:
+openssl dhparam -out certs/dhparam.pem 2048
 ```
 
-### 4. Initial Keycloak Setup
+**Option C: Let's Encrypt**
+```bash
+./scripts/init-letsencrypt.sh
+```
+
+### 4. Run Pre-flight Check
+
+Validate everything is ready before starting:
+
+```bash
+# Check for issues
+./scripts/preflight-check.sh
+
+# Or auto-fix common issues
+./scripts/preflight-check.sh --fix
+```
+
+### 5. Start Services
+
+```bash
+# Start Keycloak stack
+docker compose up -d
+
+# Check status
+docker compose ps
+```
+
+### 6. Initial Keycloak Setup
 
 1. Access Keycloak admin console: `https://auth.jade.local`
 2. Log in with admin credentials from `.env`
@@ -113,8 +150,14 @@ sudo docker compose ps
 
 ### Prerequisites
 
-- Docker & Docker Compose
+- Docker & Docker Compose v2+
 - Domain names configured (see below)
+- TLS certificates (see [TLS Certificate Modes](#tls-certificate-modes))
+
+> **Note on file mounts:** Docker will create mount points as root-owned directories
+> if the source files don't exist. Always generate certificates BEFORE running
+> `docker compose up` for the first time. If you encounter permission issues,
+> run `./scripts/preflight-check.sh --fix` to repair them.
 
 ### Configuring Local Domains
 
@@ -285,16 +328,43 @@ LETSENCRYPT_EMAIL=admin@example.com
 
 ## TLS Certificate Modes
 
-### Mode A: Provided Certificates (Default)
+### Required Files
 
-Place your certificates in `./certs/`:
+All TLS modes require these files in `./certs/`:
 ```bash
 ./certs/
 ├── fullchain.pem  # Full certificate chain
-└── privkey.pem    # Private key
+├── privkey.pem    # Private key
+└── dhparam.pem    # DH parameters for key exchange
 ```
 
-### Mode B: Let's Encrypt
+**About DH Parameters:**
+- DH parameters are random prime numbers for Diffie-Hellman key exchange
+- They are NOT certificate-dependent (same file works with any certificate)
+- Generate once: `openssl dhparam -out certs/dhparam.pem 2048`
+- Or use `./scripts/preflight-check.sh --fix` to auto-generate
+
+### Mode A: Self-Signed Certificates (Development)
+
+```bash
+./scripts/init-selfsigned.sh
+```
+
+This generates all required files automatically.
+
+### Mode B: Provided Certificates (Production)
+
+Place your certificates in `./certs/`:
+```bash
+# Copy your certificates
+cp /path/to/your/fullchain.pem certs/
+cp /path/to/your/privkey.pem certs/
+
+# Generate DH parameters if you don't have them
+openssl dhparam -out certs/dhparam.pem 2048
+```
+
+### Mode C: Let's Encrypt
 
 1. Update `.env`:
    ```bash

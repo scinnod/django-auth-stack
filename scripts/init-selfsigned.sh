@@ -220,24 +220,24 @@ log_info "Certificate generated: $CERT_DIR/fullchain.pem"
 rm "$CERT_DIR/openssl.cnf"
 
 # =============================================================================
-# Generate DH Parameters (Optional but Recommended)
+# Generate DH Parameters (Required for TLS)
+# =============================================================================
+# DH parameters are random prime numbers used for Diffie-Hellman key exchange.
+# They are NOT certificate-dependent and can be pre-generated.
+# We store them in certs/ alongside certificates for consistency.
 # =============================================================================
 
 echo ""
-read -p "Generate DH parameters for enhanced security? (recommended but slow) (y/N): " -n 1 -r
-echo
+log_step "Generating DH parameters (${DHPARAM_SIZE}-bit)..."
+log_warn "This may take 1-2 minutes..."
 
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    log_step "Generating DH parameters (${DHPARAM_SIZE}-bit)..."
-    log_warn "This may take several minutes..."
-    
-    openssl dhparam -out nginx/dhparam.pem $DHPARAM_SIZE 2>/dev/null
-    
-    chmod 644 nginx/dhparam.pem
-    log_info "DH parameters generated: nginx/dhparam.pem"
+# Generate in certs/ directory (same as certificates)
+if openssl dhparam -out "$CERT_DIR/dhparam.pem" $DHPARAM_SIZE 2>/dev/null; then
+    chmod 644 "$CERT_DIR/dhparam.pem"
+    log_info "DH parameters generated: $CERT_DIR/dhparam.pem"
 else
-    log_info "Skipping DH parameter generation"
-    log_info "You can generate later with: openssl dhparam -out nginx/dhparam.pem 2048"
+    log_error "Failed to generate DH parameters"
+    log_info "You can generate manually with: openssl dhparam -out certs/dhparam.pem 2048"
 fi
 
 # =============================================================================
@@ -265,7 +265,7 @@ echo ""
 log_info "Generated files:"
 log_info "  - $CERT_DIR/fullchain.pem (certificate)"
 log_info "  - $CERT_DIR/privkey.pem (private key)"
-[ -f "nginx/dhparam.pem" ] && log_info "  - nginx/dhparam.pem (DH parameters)"
+[ -f "$CERT_DIR/dhparam.pem" ] && log_info "  - $CERT_DIR/dhparam.pem (DH parameters)"
 echo ""
 log_warn "IMPORTANT SECURITY NOTES:"
 log_warn "  1. Self-signed certificates will show browser warnings"

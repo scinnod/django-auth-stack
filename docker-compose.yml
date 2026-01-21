@@ -207,9 +207,11 @@ services:
       #   Certbot volume mounted instead
       - ./certs:/etc/letsencrypt:ro
       
-      # DH parameters for enhanced TLS security (optional but recommended)
-      # Generate: openssl dhparam -out ./nginx/dhparam.pem 2048
-      - ./nginx/dhparam.pem:/etc/nginx/dhparam.pem:ro
+      # DH parameters for enhanced TLS security (required)
+      # Generate: openssl dhparam -out ./certs/dhparam.pem 2048
+      # Or run: ./scripts/init-selfsigned.sh (generates automatically)
+      # Or run: ./scripts/preflight-check.sh --fix (generates if missing)
+      - ./certs/dhparam.pem:/etc/nginx/dhparam.pem:ro
       
       # Logs
       - nginx_logs:/var/log/nginx
