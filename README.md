@@ -264,24 +264,7 @@ openssl rand -base64 20
      sudo docker compose restart oauth2-proxy nginx
      ```
 
-6. **Configure Audience Mapper** (Required):
-   
-   OAuth2-proxy requires the client ID to be included in the `aud` (audience) claim of the JWT token. Keycloak doesn't do this by default.
-   
-   - Go to **Client scopes** tab
-   - Click on `oauth2-proxy-dedicated` (the dedicated scope for your client)
-   - Click **Add mapper** → **By configuration**
-   - Select **Audience**
-   - Configure:
-     - **Name**: `audience-mapper`
-     - **Included Client Audience**: Select `oauth2-proxy` (your client)
-     - **Add to ID token**: `ON`
-     - **Add to access token**: `ON`
-   - Click **Save**
-   
-   > **Important:** Without this mapper, OAuth2-proxy authentication will fail with token validation errors.
-
-> **Note on Username Claim:** OAuth2-proxy is configured to use the `preferred_username` claim (the actual Keycloak username like `john.doe`) instead of the default `sub` claim (a UUID). This makes Django user management more intuitive.
+> **Note on Username:** OAuth2-proxy is configured with `--user-id-claim=preferred_username` to pass the actual Keycloak username (like `john.doe`) to Django instead of the UUID.
 
 ### Step 3: Create Test Users
 
@@ -555,7 +538,6 @@ Details on OIDC RP-Initiated Logout implementation:
 - How full SSO logout works (Django + Keycloak session termination)
 - Nginx-based logout handling (oauth2-proxy v7.6.0 workaround)
 - Required Keycloak client settings (Valid Post Logout Redirect URIs)
-- Audience mapper configuration for `keycloak-oidc` provider
 - Testing and troubleshooting
 
 ---

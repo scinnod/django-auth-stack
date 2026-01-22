@@ -117,7 +117,6 @@ See [Django Integration Guide](django-integration.md#5-logout-handling) for comp
 Before testing logout, ensure you've configured in Keycloak Admin Console:
 
 - [ ] ✅ **Valid Post Logout Redirect URIs** - `https://your-domain/*` (see detailed steps below)
-- [ ] ✅ **Audience Mapper** - Add client ID to `aud` claim (see detailed steps below)
 - [ ] ✅ **Valid Redirect URIs** - Include `https://auth.domain/oauth2/callback`
 
 **Without these, logout will fail or login will break.**
@@ -159,37 +158,6 @@ For each OIDC client in Keycloak, configure the following:
    5. Click **Save**
 
 5. **Web Origins**: `+` (allows all valid redirect URIs)
-
-### Required: Audience Mapper (for keycloak-oidc provider)
-
-OAuth2-proxy with `--provider=keycloak-oidc` requires the client ID to be included
-in the `aud` (audience) claim of the JWT token. Keycloak doesn't do this by default.
-
-**Steps to add the audience mapper:**
-
-1. Go to Keycloak Admin Console → Your Realm → Clients → Your Client
-2. Click the **Client scopes** tab
-3. Click on `<your-client-id>-dedicated` (e.g., `oauth2-proxy-dedicated`)
-4. Click **Configure a new mapper** (or **Add mapper** → **By configuration**)
-5. Select **Audience**
-6. Configure:
-   - **Name**: `audience-mapper` (or any descriptive name)
-   - **Included Client Audience**: Select your client (e.g., `oauth2-proxy`)
-   - **Add to ID token**: ON
-   - **Add to access token**: ON
-7. Click **Save**
-
-**Verification**: After adding the mapper, you can test by:
-1. Go to Clients → Your Client → Client scopes → Evaluate
-2. Select a test user
-3. Click **Generated ID token** or **Generated access token**
-4. Verify the `aud` claim includes your client ID:
-   ```json
-   {
-     "aud": ["oauth2-proxy", "account"],
-     ...
-   }
-   ```
 
 ### Example for ITSM Client
 

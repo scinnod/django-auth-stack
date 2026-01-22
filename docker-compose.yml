@@ -128,12 +128,13 @@ services:
       - --cookie-secure=true
       - --cookie-domain=${OAUTH2_PROXY_COOKIE_DOMAIN:-.example.org}
       - --whitelist-domain=${OAUTH2_PROXY_COOKIE_DOMAIN:-.example.org}
-      # Dedicated Keycloak OIDC provider (requires audience mapper in Keycloak)
-      # See docs/keycloak-logout.md for required Keycloak configuration
-      - --provider=keycloak-oidc
+      # OIDC provider configuration for Keycloak
+      - --provider=oidc
       - --provider-display-name=Keycloak
-      # Use preferred_username claim (actual username) instead of sub claim (UUID)
+      # Use preferred_username claim (actual username) instead of sub (UUID)
       - --user-id-claim=preferred_username
+      - --oidc-email-claim=email
+      - --oidc-groups-claim=groups
       # Internal URL for oauth2-proxy <-> Keycloak communication
       - --oidc-issuer-url=http://keycloak:8080/realms/${KEYCLOAK_REALM:-master}
       - --redirect-url=https://${DOMAIN_AUTH:-auth.example.org}/oauth2/callback

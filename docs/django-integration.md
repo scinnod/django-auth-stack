@@ -193,6 +193,7 @@ REMOTE_USER_HEADER = 'HTTP_X_REMOTE_USER'
 - `X-Remote-Email` header → Keycloak email (e.g., `david.kleinhans@jade-hs.de`)
 
 **Username Claim Configuration:**
+
 OAuth2-proxy is configured with `--user-id-claim=preferred_username`, which uses the actual Keycloak username instead of the default `sub` claim (UUID). This makes user management in Django much more intuitive - you'll see `john.doe` instead of `a1b2c3d4-e5f6-...`.
 
 **Automatic User Creation:**
