@@ -131,8 +131,11 @@ services:
       # OIDC provider configuration for Keycloak
       - --provider=oidc
       - --provider-display-name=Keycloak
-      # Use preferred_username claim (actual username) instead of sub (UUID)
-      - --user-id-claim=preferred_username
+      # Request email and profile scopes
+      - --scope=openid email profile
+      # Use email claim for both User and Email fields (OIDC default behavior)
+      # Note: Both session.User and session.Email will contain the email address
+      # Django can extract username from email if needed (e.g., email.split('@')[0])
       - --oidc-email-claim=email
       - --oidc-groups-claim=groups
       # Internal URL for oauth2-proxy <-> Keycloak communication
@@ -154,6 +157,7 @@ services:
       #   - Internal Keycloak URL (http://keycloak:8080)
       #   - Unverified email addresses
       # For production with proper certificates, consider removing these.
+      # Skip fetching claims from UserInfo endpoint - all claims should be in ID token
       - --skip-claims-from-profile-url=true
       # Use PKCE for enhanced security (recommended for Keycloak)
       - --code-challenge-method=S256

@@ -186,15 +186,19 @@ REMOTE_USER_HEADER = 'HTTP_X_REMOTE_USER'
 
 ## Common Configuration (Both Patterns)
 
-### Automatic User Creation & Email Handling
+### User Identification & Email Handling
 
-**Yes, Django receives the user's email address!** Nginx passes both username and email:
-- `X-Remote-User` header → Keycloak username from `preferred_username` claim (e.g., `david.kleinhans`)
-- `X-Remote-Email` header → Keycloak email (e.g., `david.kleinhans@jade-hs.de`)
+Nginx passes two separate headers from OAuth2-proxy to Django:
+- `X-Remote-User` header → Keycloak username (e.g., `davidkl`) from the `preferred_username` claim
+- `X-Remote-Email` header → Keycloak email (e.g., `david.kleinhans@jade-hs.de`) from the `email` claim
 
-**Username Claim Configuration:**
+**Implications for Django:**
+1. Django will create users with the actual Keycloak username (e.g., `davidkl`)
+2. Use a custom backend to capture the email from `X-Remote-Email` header
 
-OAuth2-proxy is configured with `--user-id-claim=preferred_username`, which uses the actual Keycloak username instead of the default `sub` claim (UUID). This makes user management in Django much more intuitive - you'll see `john.doe` instead of `a1b2c3d4-e5f6-...`.
+This configuration ensures:
+- Django usernames match Keycloak usernames (intuitive user management)
+- Django has the user's email for notifications, password resets, etc.
 
 **Automatic User Creation:**
 When a user logs in via Keycloak for the first time, Django's `RemoteUserBackend` **automatically creates** a Django User account:
@@ -204,60 +208,79 @@ When a user logs in via Keycloak for the first time, Django's `RemoteUserBackend
 - `is_superuser` = False
 - No password is set (authentication is handled by Keycloak)
 
-### Custom Backend to Populate Email (Recommended for Both Patterns)
+### Option 1: Basic RemoteUserBackend (Simplest)
 
-# Header configuration - tells RemoteUserMiddleware which header to trust
-# This header is set by nginx from OAuth2-proxy's X-Auth-Request-User
+No custom backend needed - Django will use the Keycloak username directly:
+
+```python
+# settings.py
 REMOTE_USER_HEADER = 'HTTP_X_REMOTE_USER'
 
-# =============================================================================
-# RECOMMENDED: Custom backend to populate email from Keycloak
-# =============================================================================
-# RemoteUserBackend automatically creates users, but doesn't populate the email
-# field by default. Use this custom backend to capture email from X-Remote-Email.
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.RemoteUserBackend',
+    'django.contrib.auth.backends.ModelBackend',
+]
+```
 
-# Create this in yourapp/backends.py:
+**Result:** Django creates users with:
+- `username` = `davidkl` (from Keycloak)
+- `email` = empty (not automatically populated)
+
+### Option 2: Custom Backend with Email Support (Recommended)
+
+Use a custom backend to also capture the email address:
+
+```python
+# yourapp/backends.py
 from django.contrib.auth.backends import RemoteUserBackend
 
 class CustomRemoteUserBackend(RemoteUserBackend):
     """
-    Custom backend that automatically populates user email from Keycloak.
-    Also demonstrates how to set additional fields.
+    Custom backend that captures email from X-Remote-Email header.
+    
+    OAuth2-proxy provides:
+    - X-Remote-User: Keycloak username (preferred_username claim)
+    - X-Remote-Email: Keycloak email (email claim)
     """
-    def configure_user(self, request, user):
+    
+    def configure_user(self, request, user, created=True):
         """
-        Called ONLY when a user is created for the first time.
-        Subsequent logins will NOT trigger this method.
+        Configure user on first login - capture email from header.
         """
-        # Get email from nginx header (X-Remote-Email from Keycloak)
         email = request.META.get('HTTP_X_REMOTE_EMAIL', '')
         if email:
             user.email = email
-        
-        # Optional: Set first_name, last_name from Keycloak claims
-        # (requires OAuth2-proxy to pass additional headers)
-        # user.first_name = request.META.get('HTTP_X_AUTH_REQUEST_GIVEN_NAME', '')
-        # user.last_name = request.META.get('HTTP_X_AUTH_REQUEST_FAMILY_NAME', '')
-        
-        user.save()
-        return user
-    
-    def configure_user_on_login(self, request, user):
-        """
-        OPTIONAL: Called on EVERY login to update user info.
-        Useful if you want to sync email changes from Keycloak.
-        """
-        email = request.META.get('HTTP_X_REMOTE_EMAIL', '')
-        if email and user.email != email:
-            user.email = email
             user.save()
         return user
+    
+    def authenticate(self, request, remote_user):
+        """
+        Authenticate and update email on every login.
+        """
+        if not remote_user:
+            return None
+        
+        user = super().authenticate(request, remote_user)
+        
+        # Update email on every login (in case it changed in Keycloak)
+        if user:
+            email = request.META.get('HTTP_X_REMOTE_EMAIL', '')
+            if email and user.email != email:
+                user.email = email
+                user.save()
+        
+        return user
 
-# Then update AUTHENTICATION_BACKENDS in settings.py:
+# settings.py
 AUTHENTICATION_BACKENDS = [
-    'yourapp.backends.CustomRemoteUserBackend',  # Use custom backend with email
+    'yourapp.backends.CustomRemoteUserBackend',
     'django.contrib.auth.backends.ModelBackend',
 ]
+```
+
+**Result:** Django creates users with:
+- `username` = `davidkl` (from Keycloak)
+- `email` = `david.kleinhans@jade-hs.de` (from Keycloak)
 ```
 
 ### 2. Understanding `@login_required` Behavior

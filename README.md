@@ -264,7 +264,11 @@ openssl rand -base64 20
      sudo docker compose restart oauth2-proxy nginx
      ```
 
-> **Note on Username:** OAuth2-proxy is configured with `--user-id-claim=preferred_username` to pass the actual Keycloak username (like `john.doe`) to Django instead of the UUID.
+> **Note on User Identification:** OAuth2-proxy passes two separate headers to Django:
+> - `X-Remote-User`: The Keycloak username (e.g., `john.doe`) from the `preferred_username` claim
+> - `X-Remote-Email`: The Keycloak email (e.g., `john.doe@example.com`) from the `email` claim
+>
+> See [Django Integration Guide](docs/django-integration.md) for details on using these headers.
 
 ### Step 3: Create Test Users
 
