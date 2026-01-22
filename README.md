@@ -264,6 +264,23 @@ openssl rand -base64 20
      sudo docker compose restart oauth2-proxy nginx
      ```
 
+6. **Configure Audience Mapper** (Required):
+   
+   OAuth2-proxy requires the client ID to be included in the `aud` (audience) claim of the JWT token. Keycloak doesn't do this by default.
+   
+   - Go to **Client scopes** tab
+   - Click on `oauth2-proxy-dedicated` (the dedicated scope for your client)
+   - Click **Add mapper** → **By configuration**
+   - Select **Audience**
+   - Configure:
+     - **Name**: `audience-mapper`
+     - **Included Client Audience**: Select `oauth2-proxy` (your client)
+     - **Add to ID token**: `ON`
+     - **Add to access token**: `ON`
+   - Click **Save**
+   
+   > **Important:** Without this mapper, OAuth2-proxy authentication will fail with token validation errors.
+
 ### Step 3: Create Test Users
 
 1. Go to **Users** → **Add user**

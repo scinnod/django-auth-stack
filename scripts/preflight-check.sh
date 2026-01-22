@@ -264,46 +264,84 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# Check 5: External Docker networks
-# -----------------------------------------------------------------------------
-echo ""
-echo "--- Docker Networks ---"
-
-check_network() {
-    local network=$1
-    if docker network inspect "$network" &>/dev/null; then
-        log_ok "Network '$network' exists"
-        return 0
-    else
-        log_error "Network '$network' does not exist"
-        if $FIX_MODE; then
-            if docker network create "$network" &>/dev/null; then
-                log_fix "Created network '$network'"
-                ((ERRORS--))
-            else
-                log_error "Failed to create network '$network'"
-            fi
-        else
-            log_info "  Create with: docker network create $network"
-        fi
-        return 1
-    fi
-}
-
-check_network "itsm_backend"
-check_network "translation_backend"
-
-# -----------------------------------------------------------------------------
-# Check 6: Docker daemon
+# Check 5: Docker daemon and networks
 # -----------------------------------------------------------------------------
 echo ""
 echo "--- Docker ---"
 
-if docker info &>/dev/null; then
-    log_ok "Docker daemon is running"
+# Check if docker command exists
+if ! command -v docker &>/dev/null; then
+    log_error "Docker is not installed"
+    log_info "  Install Docker: https://docs.docker.com/get-docker/"
+    DOCKER_AVAILABLE=false
 else
-    log_error "Docker daemon is not running or not accessible"
-    log_info "  Start Docker or check permissions"
+    # Check if docker daemon is accessible
+    if docker info &>/dev/null 2>&1; then
+        log_ok "Docker daemon is running and accessible"
+        DOCKER_AVAILABLE=true
+    else
+        # Docker command exists but daemon not accessible - likely needs sudo
+        log_error "Docker daemon is not accessible (may require sudo)"
+        log_info "  Docker is installed but requires elevated privileges"
+        log_info ""
+        log_info "  Option 1: Run this script with sudo to check Docker networks:"
+        log_info "    sudo ./scripts/preflight-check.sh"
+        log_info ""
+        log_info "  Option 2: Add your user to the docker group (requires re-login):"
+        log_info "    sudo usermod -aG docker \$USER"
+        log_info "    newgrp docker  # or logout and login again"
+        log_info ""
+        log_info "  Option 3: Manually check networks with sudo:"
+        log_info "    sudo docker network ls | grep -E '(itsm_backend|translation_backend)'"
+        log_info "    sudo docker network create itsm_backend"
+        log_info "    sudo docker network create translation_backend"
+        log_info ""
+        log_info "  Note: When running docker compose, you'll need to use:"
+        log_info "    sudo docker compose up -d"
+        
+        DOCKER_AVAILABLE=false
+    fi
+fi
+
+# -----------------------------------------------------------------------------
+# Check 6: External Docker networks (only if Docker is accessible)
+# -----------------------------------------------------------------------------
+if [ "$DOCKER_AVAILABLE" = true ]; then
+    echo ""
+    echo "--- Docker Networks ---"
+    
+    check_network() {
+        local network=$1
+        if docker network inspect "$network" &>/dev/null; then
+            log_ok "Network '$network' exists"
+            return 0
+        else
+            log_error "Network '$network' does not exist"
+            if $FIX_MODE; then
+                if docker network create "$network" &>/dev/null; then
+                    log_fix "Created network '$network'"
+                    ((ERRORS--))
+                else
+                    log_error "Failed to create network '$network'"
+                fi
+            else
+                log_info "  Create with: docker network create $network"
+                if [ "$(id -u)" -ne 0 ] && ! docker info &>/dev/null 2>&1; then
+                    log_info "  (or with sudo: sudo docker network create $network)"
+                fi
+            fi
+            return 1
+        fi
+    }
+    
+    check_network "itsm_backend"
+    check_network "translation_backend"
+else
+    echo ""
+    echo "--- Docker Networks ---"
+    log_warn "Skipping network checks (Docker not accessible)"
+    log_info "  Once Docker is accessible, verify networks exist:"
+    log_info "    docker network ls | grep -E '(itsm_backend|translation_backend)'"
 fi
 
 # =============================================================================
