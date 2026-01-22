@@ -189,12 +189,15 @@ REMOTE_USER_HEADER = 'HTTP_X_REMOTE_USER'
 ### Automatic User Creation & Email Handling
 
 **Yes, Django receives the user's email address!** Nginx passes both username and email:
-- `X-Remote-User` header → Keycloak username (e.g., `david.kleinhans`)
+- `X-Remote-User` header → Keycloak username from `preferred_username` claim (e.g., `david.kleinhans`)
 - `X-Remote-Email` header → Keycloak email (e.g., `david.kleinhans@jade-hs.de`)
+
+**Username Claim Configuration:**
+OAuth2-proxy is configured with `--user-id-claim=preferred_username`, which uses the actual Keycloak username instead of the default `sub` claim (UUID). This makes user management in Django much more intuitive - you'll see `john.doe` instead of `a1b2c3d4-e5f6-...`.
 
 **Automatic User Creation:**
 When a user logs in via Keycloak for the first time, Django's `RemoteUserBackend` **automatically creates** a Django User account:
-- `username` = value from `X-Remote-User` header
+- `username` = value from `X-Remote-User` header (Keycloak's `preferred_username`)
 - `email` = empty by default (see below to populate from header)
 - `is_staff` = False
 - `is_superuser` = False
@@ -410,7 +413,7 @@ from django.contrib.auth.decorators import login_required
 def debug_auth(request):
     """Debug view to see authentication headers."""
     return JsonResponse({
-        'username': request.user.username,
+        'username': request.user.username,  # e.g., 'john.doe' (from preferred_username)
         'email': request.user.email,
         'is_authenticated': request.user.is_authenticated,
         'headers': {
@@ -435,7 +438,8 @@ curl -H "Cookie: _oauth2_proxy=..." https://itsm.jade.local/admin/
 
 # 3. Check Django sees authenticated user
 curl -H "Cookie: _oauth2_proxy=..." https://itsm.jade.local/debug_auth
-# Expected: {"username": "david.kleinhans", "is_authenticated": true}
+# Expected: {"username": "john.doe", "is_authenticated": true}
+# Note: Username is from Keycloak's preferred_username claim, not UUID
 ```
 
 ### 3. Test @login_required Decorator

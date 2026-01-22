@@ -132,6 +132,8 @@ services:
       # See docs/keycloak-logout.md for required Keycloak configuration
       - --provider=keycloak-oidc
       - --provider-display-name=Keycloak
+      # Use preferred_username claim (actual username) instead of sub claim (UUID)
+      - --user-id-claim=preferred_username
       # Internal URL for oauth2-proxy <-> Keycloak communication
       - --oidc-issuer-url=http://keycloak:8080/realms/${KEYCLOAK_REALM:-master}
       - --redirect-url=https://${DOMAIN_AUTH:-auth.example.org}/oauth2/callback

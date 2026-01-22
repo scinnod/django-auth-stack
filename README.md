@@ -281,6 +281,8 @@ openssl rand -base64 20
    
    > **Important:** Without this mapper, OAuth2-proxy authentication will fail with token validation errors.
 
+> **Note on Username Claim:** OAuth2-proxy is configured to use the `preferred_username` claim (the actual Keycloak username like `john.doe`) instead of the default `sub` claim (a UUID). This makes Django user management more intuitive.
+
 ### Step 3: Create Test Users
 
 1. Go to **Users** → **Add user**
