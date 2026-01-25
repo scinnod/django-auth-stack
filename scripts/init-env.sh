@@ -239,7 +239,7 @@ while true; do
     svc_name=$(echo "$svc_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_]/_/g')
     
     # Domain
-    default_domain="${svc_name}.${cookie_domain#.}"
+    default_domain="${svc_name}${cookie_domain}"
     read -p "  Domain [${default_domain}]: " svc_domain
     svc_domain=${svc_domain:-$default_domain}
     
