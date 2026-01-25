@@ -9,12 +9,15 @@ SPDX-License-Identifier: Apache-2.0
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)](https://docs.docker.com/compose/)
 [![Keycloak](https://img.shields.io/badge/Keycloak-23.0-blue)](https://www.keycloak.org/)
 
-Production-ready authentication gateway combining nginx reverse proxy with Keycloak SSO for Django services.
+Production-ready authentication gateway combining nginx reverse proxy with Keycloak SSO for any number of upstream services.
 
 ## 🎯 Features
 
 - **Keycloak SSO** - Industry-standard OIDC & SAML authentication
 - **OAuth2 Proxy** - Seamless forward auth integration with nginx  
+- **Dynamic Service Configuration** - Configure any number of upstream services via `.env`
+- **Two Authentication Patterns** - Django-controlled (Pattern A) or full protection (Pattern B)
+- **Per-Service Enable/Disable** - Toggle services on/off without removing configuration
 - **Config-as-Code** - Manage Keycloak via JSON realm exports (no clicking!)
 - **Network Segmentation** - Defense-in-depth with isolated Docker networks
 - **Dual TLS Mode** - Provided certificates or Let's Encrypt
@@ -24,14 +27,15 @@ Production-ready authentication gateway combining nginx reverse proxy with Keycl
 
 1. [Architecture](#architecture)
 2. [Quick Start](#quick-start)
-3. [Initial Setup](#initial-setup)
-4. [Keycloak Configuration](#keycloak-configuration)
-5. [Domain Selection](#domain-selection)
-6. [TLS Certificate Modes](#tls-certificate-modes)
-7. [Network Architecture](#network-architecture)
-8. [Django Integration](#django-integration)
-9. [Production Readiness](#production-readiness)
-10. [Troubleshooting](#troubleshooting)
+3. [Service Configuration](#service-configuration)
+4. [Initial Setup](#initial-setup)
+5. [Keycloak Configuration](#keycloak-configuration)
+6. [Domain Selection](#domain-selection)
+7. [TLS Certificate Modes](#tls-certificate-modes)
+8. [Network Architecture](#network-architecture)
+9. [Django Integration](#django-integration)
+10. [Production Readiness](#production-readiness)
+11. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -42,11 +46,11 @@ Internet
    ↓
 nginx (TLS termination, reverse proxy)
    ↓
-   ├─→ Public paths (no auth) → Upstream Apps
+   ├─→ Public paths (Pattern A) → Upstream Apps
    ↓
    ├─→ Protected paths → OAuth2 Proxy → Keycloak → Upstream Apps
    ↓
-   └─→ auth.jade.local → Keycloak Admin Console
+   └─→ auth.example.local → Keycloak Admin Console
 ```
 
 ### Components
@@ -55,22 +59,15 @@ nginx (TLS termination, reverse proxy)
 - **Keycloak**: SSO server providing OIDC & SAML
 - **OAuth2 Proxy**: Forward authentication middleware
 - **PostgreSQL**: Keycloak database
-- **Upstream Apps**: Your Django services (ITSM, Translation)
+- **Upstream Services**: Any number of services (Django, Node.js, etc.)
 
 ---
 
 ## Quick Start
 
-### 1. Create External Networks
+### 1. Configure Environment & Services
 
-```bash
-docker network create itsm_backend
-docker network create translation_backend
-```
-
-### 2. Configure Environment
-
-Run the initialization script to generate secure passwords and configure domains:
+Run the initialization script to generate secure passwords and configure your services:
 
 ```bash
 ./scripts/init-env.sh
@@ -80,15 +77,36 @@ This will:
 - Generate secure Keycloak admin password
 - Generate OAuth2-proxy secrets
 - Prompt for domain configuration
+- **Interactively configure your upstream services** (name, domain, pattern, network)
 - Create `.env` file with all required variables
 
 Alternatively, manually copy and edit:
 ```bash
 cp .env.example .env
-# Edit .env with your values
+# Edit .env with your values (see Service Configuration section)
 ```
 
-### 3. Generate or Place TLS Certificates
+### 2. Generate Docker Compose Override
+
+After configuring services in `.env`, generate the network configuration:
+
+```bash
+./scripts/generate-compose-override.sh
+```
+
+This creates `docker-compose.override.yml` with the external networks for your services.
+
+### 3. Create External Networks
+
+Create Docker networks for each configured service:
+
+```bash
+# Example for services named "itsm" and "translation"
+docker network create itsm_backend
+docker network create translation_backend
+```
+
+### 4. Generate or Place TLS Certificates
 
 > ⚠️ **IMPORTANT:** Certificates MUST exist before starting Docker services!
 > If Docker starts first, it creates empty root-owned directories that complicate setup.
@@ -116,7 +134,7 @@ openssl dhparam -out certs/dhparam.pem 2048
 ./scripts/init-letsencrypt.sh
 ```
 
-### 4. Run Pre-flight Check
+### 5. Run Pre-flight Check
 
 Validate everything is ready before starting:
 
@@ -128,21 +146,84 @@ Validate everything is ready before starting:
 ./scripts/preflight-check.sh --fix
 ```
 
-### 5. Start Services
+### 6. Start Services
 
 ```bash
 # Start Keycloak stack
+# Note: docker-compose.override.yml is automatically loaded if it exists
 docker compose up -d
 
 # Check status
 docker compose ps
+
+# View logs
+docker compose logs -f nginx
 ```
 
-### 6. Initial Keycloak Setup
+### 7. Initial Keycloak Setup
 
-1. Access Keycloak admin console: `https://auth.jade.local`
+1. Access Keycloak admin console: `https://auth.example.local`
 2. Log in with admin credentials from `.env`
 3. Follow [Keycloak Configuration](#keycloak-configuration) section
+
+---
+
+## Service Configuration
+
+This stack supports **any number of upstream services** (0 to N), each configured in `.env`.
+
+### Configuration Variables
+
+Each service is configured with numbered variables:
+
+```bash
+# --- Service 1: Example Django App ---
+SERVICE_1_NAME=myapp                      # Unique name (lowercase, alphanumeric)
+SERVICE_1_ENABLED=true                    # true/false - toggle without removing config
+SERVICE_1_PATTERN=A                       # A or B (see patterns below)
+SERVICE_1_DOMAIN=myapp.example.local      # Domain for this service
+SERVICE_1_UPSTREAM=myapp_nginx:8000       # Container:port to proxy to
+SERVICE_1_NETWORK=myapp_backend           # Docker network name
+
+# --- Service 2: Another App ---
+SERVICE_2_NAME=admin
+SERVICE_2_ENABLED=true
+SERVICE_2_PATTERN=B
+SERVICE_2_DOMAIN=admin.example.local
+SERVICE_2_UPSTREAM=admin_app:3000
+SERVICE_2_NETWORK=admin_backend
+```
+
+### Authentication Patterns
+
+**Pattern A: Django-Controlled Authentication**
+- Django decides what's public vs protected
+- Public pages accessible without login
+- `@login_required` triggers Keycloak SSO via `/sso-login/`
+- **Best for:** Django apps with public landing pages + protected areas
+
+**Pattern B: Full nginx-Level Authentication**
+- ALL requests require Keycloak login (including static files)
+- nginx validates every request before forwarding
+- **Best for:** Internal tools, admin dashboards, fully confidential services
+- **Works with any upstream** (not just Django)
+
+### Adding/Removing Services
+
+1. Edit `.env` to add/modify/remove service configuration
+2. Regenerate compose override: `./scripts/generate-compose-override.sh`
+3. Create new networks if needed: `docker network create <service>_backend`
+4. Restart nginx: `docker compose restart nginx`
+
+### Disabling a Service
+
+Set `SERVICE_N_ENABLED=false` to disable a service without removing its configuration:
+
+```bash
+SERVICE_2_ENABLED=false   # Temporarily disabled
+```
+
+Then restart nginx: `docker compose restart nginx`
 
 ---
 
@@ -168,8 +249,8 @@ For local development, add the domains to your hosts file:
 # Edit hosts file (requires sudo)
 sudo nano /etc/hosts
 
-# Add this line:
-127.0.0.1 auth.jade.local itsm.jade.local translation.jade.local
+# Add your configured domains:
+127.0.0.1 auth.example.local myapp.example.local admin.example.local
 ```
 
 **Windows:**
@@ -177,8 +258,8 @@ sudo nano /etc/hosts
 # Open PowerShell as Administrator, then edit:
 notepad C:\Windows\System32\drivers\etc\hosts
 
-# Add this line:
-127.0.0.1 auth.jade.local itsm.jade.local translation.jade.local
+# Add your configured domains:
+127.0.0.1 auth.example.local myapp.example.local admin.example.local
 ```
 
 > **Note:** For production, use real domain names with proper DNS records instead of hosts file entries.
@@ -200,11 +281,18 @@ OAUTH2_PROXY_CLIENT_ID=oauth2-proxy
 OAUTH2_PROXY_CLIENT_SECRET=<from-keycloak-after-setup>
 OAUTH2_PROXY_COOKIE_SECRET=<32-char-random-string>
 
-# Domains
-DOMAIN_AUTH=auth.jade.local
-DOMAIN_ITSM=itsm.jade.local
-DOMAIN_TRANSLATION=translation.jade.local
+# Auth Domain
+DOMAIN_AUTH=auth.example.local
+OAUTH2_PROXY_COOKIE_DOMAIN=.example.local
 KEYCLOAK_REALM=jade
+
+# Services (see Service Configuration section)
+SERVICE_1_NAME=myapp
+SERVICE_1_ENABLED=true
+SERVICE_1_PATTERN=A
+SERVICE_1_DOMAIN=myapp.example.local
+SERVICE_1_UPSTREAM=myapp_nginx:8000
+SERVICE_1_NETWORK=myapp_backend
 ```
 
 **Generate secrets:**
@@ -222,7 +310,7 @@ openssl rand -base64 20
 
 ### Step 1: Create a Realm
 
-1. Access Keycloak admin: `https://auth.jade.local`
+1. Access Keycloak admin: `https://auth.example.local`
 2. Click dropdown in top-left (says "Master") → **Create Realm**
 3. Name: `jade` (must match `KEYCLOAK_REALM` in `.env`)
 4. Click **Create**
@@ -242,13 +330,13 @@ openssl rand -base64 20
    - Click **Next**
 
 4. **Login settings**:
-   - Root URL: `https://auth.jade.local`
+   - Root URL: `https://auth.example.local`
    - Valid redirect URIs:
      ```
-     https://auth.jade.local/oauth2/callback
-     https://itsm.jade.local/oauth2/callback
-     https://translation.jade.local/oauth2/callback
+     https://auth.example.local/oauth2/callback
+     https://*.example.local/oauth2/callback
      ```
+     (Or list each service domain explicitly)
    - Web origins: `+` (allows all valid redirect URIs)
    - Click **Save**
 
@@ -264,7 +352,7 @@ openssl rand -base64 20
      sudo docker compose restart oauth2-proxy nginx
      ```
 
-> **Note on User Identification:** OAuth2-proxy passes two separate headers to Django:
+> **Note on User Identification:** OAuth2-proxy passes two separate headers to upstream services:
 > - `X-Remote-User`: The Keycloak username (e.g., `john.doe`) from the `preferred_username` claim
 > - `X-Remote-Email`: The Keycloak email (e.g., `john.doe@example.com`) from the `email` claim
 >
@@ -303,16 +391,18 @@ Full SAML configuration guide: https://www.keycloak.org/docs/latest/server_admin
 
 **Setup:**
 ```bash
-# Add to /etc/hosts
-127.0.0.1 auth.jade.local itsm.jade.local translation.jade.local
+# Add to /etc/hosts (include all your service domains)
+127.0.0.1 auth.example.local myapp.example.local admin.example.local
 ```
 
 **Configure in `.env`:**
 ```bash
-DOMAIN_AUTH=auth.jade.local
-DOMAIN_ITSM=itsm.jade.local
-DOMAIN_TRANSLATION=translation.jade.local
-OAUTH2_PROXY_COOKIE_DOMAIN=.jade.local
+DOMAIN_AUTH=auth.example.local
+OAUTH2_PROXY_COOKIE_DOMAIN=.example.local
+
+# Each service gets its own domain
+SERVICE_1_DOMAIN=myapp.example.local
+SERVICE_2_DOMAIN=admin.example.local
 ```
 
 ### Option B: Public domains (Production)
@@ -324,10 +414,12 @@ OAUTH2_PROXY_COOKIE_DOMAIN=.jade.local
 **Configure in `.env`:**
 ```bash
 DOMAIN_AUTH=auth.example.com
-DOMAIN_ITSM=itsm.example.com
-DOMAIN_TRANSLATION=translation.example.com
 OAUTH2_PROXY_COOKIE_DOMAIN=.example.com
 LETSENCRYPT_EMAIL=admin@example.com
+
+# Each service gets its own domain
+SERVICE_1_DOMAIN=myapp.example.com
+SERVICE_2_DOMAIN=admin.example.com
 ```
 
 ---
@@ -406,35 +498,42 @@ keycloak_db (internal)
   ├─ keycloak
   └─ postgres
 
-itsm_backend (external - shared with ITSM stack)
+<service>_backend (external - one per configured service)
   ├─ nginx
-  └─ itsm_nginx:8000
-
-translation_backend (external - shared with Translation stack)
-  ├─ nginx
-  └─ translation_nginx:8000
+  └─ <service>_upstream:port
 ```
+
+### Dynamic Service Networks
+
+Service networks are added via `docker-compose.override.yml`, which is generated from your `.env` configuration:
+
+```bash
+# After configuring services in .env
+./scripts/generate-compose-override.sh
+```
+
+This creates the override file that adds external networks for each enabled service.
 
 ### Why External Networks?
 
-The `itsm_backend` and `translation_backend` networks are **external** because they're shared with other Docker Compose stacks running your Django applications.
+Service networks (e.g., `myapp_backend`) are **external** because they're shared with other Docker Compose stacks running your upstream applications.
 
-**Create them once:**
+**Create a network for each service:**
 ```bash
-docker network create itsm_backend
-docker network create translation_backend
+docker network create myapp_backend
+docker network create admin_backend
 ```
 
-**Connect your Django containers:**
+**Connect your upstream containers:**
 ```yaml
-# In your Django app's docker-compose.yml
+# In your Django/Node.js app's docker-compose.yml
 services:
-  itsm_nginx:
+  myapp_nginx:
     networks:
-      - itsm_backend
+      - myapp_backend
 
 networks:
-  itsm_backend:
+  myapp_backend:
     external: true
 ```
 
@@ -465,9 +564,9 @@ This allows you to manage Keycloak in version control instead of clicking!
 
 ## Django Integration
 
-This stack provides **two authentication patterns** as scaffold configurations:
+This stack provides **two authentication patterns** via nginx templates:
 
-### Pattern A: Django-Controlled Authentication (ITSM service)
+### Pattern A: Django-Controlled Authentication
 
 Django decides what's public vs protected. `@login_required` triggers Keycloak SSO.
 
@@ -480,9 +579,9 @@ Django decides what's public vs protected. `@login_required` triggers Keycloak S
 4. After login, Django receives `X-Remote-User` header, creates session
 5. Subsequent requests use Django session only
 
-**Configuration:** `nginx/conf.d/itsm.conf.template`
+**Template:** `nginx/conf.d/service-pattern-a.conf.template`
 
-### Pattern B: Full nginx-Level Authentication (Translation service)
+### Pattern B: Full nginx-Level Authentication
 
 nginx authenticates ALL requests (including static files). Everything protected.
 
@@ -490,10 +589,11 @@ nginx authenticates ALL requests (including static files). Everything protected.
 
 **How it works:**
 1. Every request validated by OAuth2-proxy (fast cookie check)
-2. Django receives authenticated headers for all requests
+2. Upstream receives authenticated headers for all requests
 3. Simpler setup, maximum security
+4. **Works with any upstream service** (Django, Node.js, etc.)
 
-**Configuration:** `nginx/conf.d/translation.conf.template`
+**Template:** `nginx/conf.d/service-pattern-b.conf.template`
 
 ### Django Setup
 
@@ -603,7 +703,7 @@ docker compose -f docker-compose.yml -f docker-compose.letsencrypt.yml up -d
 
 Before deploying to production:
 
-1. **Change domains** from `*.jade.local` to your production domains in `.env`
+1. **Change domains** from `*.example.local` to your production domains in `.env`
 2. **Use real TLS certificates**:
    - Either provide certificates in `./certs/` (fullchain.pem, privkey.pem)
    - Or use Let's Encrypt override (see TLS Certificate Modes section)
@@ -611,10 +711,11 @@ Before deploying to production:
    - Configure your OAuth2 client in Keycloak admin console
    - Export realm to `./keycloak/realms/` for version control
 4. **Secure all passwords** in `.env` (auto-generated by init-env.sh script)
-5. **Configure external networks**: Create `itsm_backend` and `translation_backend` networks
-6. **Review firewall rules**: Ensure only ports 80/443 are exposed
-7. **Set up log rotation** for nginx logs volume
-8. **Configure backup** for PostgreSQL volume
+5. **Configure service networks**: Create Docker networks for each service
+6. **Generate compose override**: Run `./scripts/generate-compose-override.sh`
+7. **Review firewall rules**: Ensure only ports 80/443 are exposed
+8. **Set up log rotation** for nginx logs volume
+9. **Configure backup** for PostgreSQL volume
 
 ---
 
@@ -645,20 +746,37 @@ sudo docker compose logs oauth2-proxy
 ### Authentication redirects to wrong domain
 
 **Fix cookie domain:**
-1. Verify `OAUTH2_PROXY_COOKIE_DOMAIN=.jade.local` in `.env`
+1. Verify `OAUTH2_PROXY_COOKIE_DOMAIN=.example.local` in `.env`
 2. Restart: `sudo docker compose restart oauth2-proxy nginx`
 
-### Can't access services after migration
+### Service not accessible / nginx returns 502
+
+**Check if service network is configured:**
+```bash
+# Verify docker-compose.override.yml exists
+cat docker-compose.override.yml
+
+# If missing, generate it
+./scripts/generate-compose-override.sh
+
+# Create missing networks
+docker network create <service>_backend
+
+# Restart nginx
+docker compose restart nginx
+```
+
+### Can't access services after adding new service
 
 **Check nginx logs:**
 ```bash
 sudo docker compose logs nginx
 ```
 
-**Verify nginx templates regenerated:**
+**Verify nginx configs were generated:**
 ```bash
 ls -l nginx/conf.d/*.conf
-# Should see keycloak.conf, itsm.conf, translation.conf
+# Should see keycloak.conf and one .conf per enabled service
 ```
 
 **Force regeneration:**
@@ -671,10 +789,10 @@ sudo docker compose restart nginx
 
 ```bash
 # Check OAuth2 Proxy health
-curl -k https://auth.jade.local/oauth2/ping
+curl -k https://auth.example.local/oauth2/ping
 
-# Test auth endpoint
-curl -k -v https://itsm.jade.local/oauth2/auth
+# Test auth endpoint (replace myapp with your service domain)
+curl -k -v https://myapp.example.local/oauth2/auth
 # Should return 401 (unauthorized) with redirect header
 ```
 
@@ -682,13 +800,15 @@ curl -k -v https://itsm.jade.local/oauth2/auth
 
 ## Next Steps
 
-1. ✅ Configure Keycloak realm and OIDC client
-2. ✅ Create test users
-3. ✅ Test authentication on protected paths
-4. Configure SAML for Shibboleth integration
-5. Set up production TLS certificates
-6. Export realm configuration for version control
-7. Configure additional authentication providers (LDAP, OAuth, etc.)
+1. ✅ Configure services in `.env`
+2. ✅ Generate compose override with `./scripts/generate-compose-override.sh`
+3. ✅ Configure Keycloak realm and OIDC client
+4. ✅ Create test users
+5. ✅ Test authentication on protected paths
+6. Configure SAML for Shibboleth integration (if needed)
+7. Set up production TLS certificates
+8. Export realm configuration for version control
+9. Configure additional authentication providers (LDAP, OAuth, etc.)
 
 ---
 

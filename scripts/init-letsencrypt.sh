@@ -30,11 +30,24 @@ if [ -f .env ]; then
 fi
 
 # Configuration - domains read from .env
-DOMAINS=(
-    "${DOMAIN_AUTH:-auth.example.org}"
-    "${DOMAIN_ITSM:-itsm.example.org}"
-    "${DOMAIN_TRANSLATION:-translation.example.org}"
-)
+DOMAINS=("${DOMAIN_AUTH:-auth.example.org}")
+
+# Dynamically add service domains from SERVICE_N_DOMAIN variables
+for i in $(seq 1 99); do
+    domain_var="SERVICE_${i}_DOMAIN"
+    enabled_var="SERVICE_${i}_ENABLED"
+    domain="${!domain_var}"
+    enabled="${!enabled_var:-true}"
+    
+    # Stop if no more services
+    [ -z "$domain" ] && break
+    
+    # Only add enabled services
+    if [ "$enabled" = "true" ]; then
+        DOMAINS+=("$domain")
+    fi
+done
+
 EMAIL="${LETSENCRYPT_EMAIL:-admin@example.org}"  # From .env or default
 STAGING=0  # Set to 1 for testing (avoids rate limits)
 

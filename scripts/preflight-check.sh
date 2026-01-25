@@ -263,6 +263,47 @@ else
     fi
 fi
 
+# Check if docker-compose.override.yml exists (for service networks)
+echo ""
+echo "--- Compose Override ---"
+
+if [ -f "$PROJECT_DIR/docker-compose.override.yml" ]; then
+    log_ok "docker-compose.override.yml exists"
+else
+    # Check if services are configured
+    if [ -f "$PROJECT_DIR/.env" ]; then
+        set -a
+        source "$PROJECT_DIR/.env"
+        set +a
+        
+        has_services=false
+        for i in $(seq 1 5); do
+            name_var="SERVICE_${i}_NAME"
+            eval name="\${$name_var:-}"
+            [ -n "$name" ] && has_services=true && break
+        done
+        
+        if $has_services; then
+            log_warn "docker-compose.override.yml missing but services are configured"
+            if $FIX_MODE; then
+                if [ -x "$PROJECT_DIR/scripts/generate-compose-override.sh" ]; then
+                    log_fix "Generating docker-compose.override.yml..."
+                    "$PROJECT_DIR/scripts/generate-compose-override.sh"
+                    ((WARNINGS--))
+                else
+                    log_info "  Run: ./scripts/generate-compose-override.sh"
+                fi
+            else
+                log_info "  Run: ./scripts/generate-compose-override.sh"
+            fi
+        else
+            log_info "No services configured - docker-compose.override.yml not needed"
+        fi
+    else
+        log_info "No .env file - cannot check service configuration"
+    fi
+fi
+
 # -----------------------------------------------------------------------------
 # Check 5: Docker daemon and networks
 # -----------------------------------------------------------------------------
@@ -292,9 +333,8 @@ else
         log_info "    newgrp docker  # or logout and login again"
         log_info ""
         log_info "  Option 3: Manually check networks with sudo:"
-        log_info "    sudo docker network ls | grep -E '(itsm_backend|translation_backend)'"
-        log_info "    sudo docker network create itsm_backend"
-        log_info "    sudo docker network create translation_backend"
+        log_info "    sudo docker network ls | grep <service>_backend"
+        log_info "    sudo docker network create <service>_backend"
         log_info ""
         log_info "  Note: When running docker compose, you'll need to use:"
         log_info "    sudo docker compose up -d"
@@ -309,6 +349,13 @@ fi
 if [ "$DOCKER_AVAILABLE" = true ]; then
     echo ""
     echo "--- Docker Networks ---"
+    
+    # Source .env to get SERVICE_* variables
+    if [ -f "$PROJECT_DIR/.env" ]; then
+        set -a
+        source "$PROJECT_DIR/.env"
+        set +a
+    fi
     
     check_network() {
         local network=$1
@@ -334,14 +381,40 @@ if [ "$DOCKER_AVAILABLE" = true ]; then
         fi
     }
     
-    check_network "itsm_backend"
-    check_network "translation_backend"
+    # Check networks for all enabled services
+    networks_checked=0
+    for i in $(seq 1 99); do
+        name_var="SERVICE_${i}_NAME"
+        enabled_var="SERVICE_${i}_ENABLED"
+        network_var="SERVICE_${i}_NETWORK"
+        
+        eval name="\${$name_var:-}"
+        eval enabled="\${$enabled_var:-true}"
+        eval network="\${$network_var:-}"
+        
+        # Stop if no more services defined
+        [ -z "$name" ] && break
+        
+        # Skip disabled services
+        [ "$enabled" != "true" ] && continue
+        
+        # Check network if defined
+        if [ -n "$network" ]; then
+            check_network "$network"
+            networks_checked=$((networks_checked + 1))
+        fi
+    done
+    
+    if [ $networks_checked -eq 0 ]; then
+        log_warn "No services configured in .env"
+        log_info "  Configure services with SERVICE_1_*, SERVICE_2_*, etc."
+    fi
 else
     echo ""
     echo "--- Docker Networks ---"
     log_warn "Skipping network checks (Docker not accessible)"
     log_info "  Once Docker is accessible, verify networks exist:"
-    log_info "    docker network ls | grep -E '(itsm_backend|translation_backend)'"
+    log_info "    docker network ls | grep <service>_backend"
 fi
 
 # =============================================================================

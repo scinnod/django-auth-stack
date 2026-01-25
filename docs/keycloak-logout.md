@@ -29,18 +29,17 @@ credentials again.
 
 ### Our Solution: Nginx-Handled Logout
 
-Instead of relying on oauth2-proxy, nginx handles the full logout flow. This is configured in both `itsm.conf.template` and `translation.conf.template`:
+Instead of relying on oauth2-proxy, nginx handles the full logout flow. This is configured in the service pattern templates (`service-pattern-a.conf.template` and `service-pattern-b.conf.template`):
 
 ```nginx
-# Example from itsm.conf.template (translation.conf.template uses DOMAIN_TRANSLATION)
+# Example from service-pattern-a.conf.template (Pattern B uses identical logout handling)
 location = /oauth2/sign_out {
     # Clear the oauth2-proxy cookie
     add_header Set-Cookie "_oauth2_proxy=; Path=/; Domain=${OAUTH2_PROXY_COOKIE_DOMAIN}; HttpOnly; Secure; SameSite=Lax; Max-Age=0" always;
     
     # Redirect to Keycloak's end_session_endpoint
-    # For ITSM: post_logout_redirect_uri=https://${DOMAIN_ITSM}/
-    # For Translation: post_logout_redirect_uri=https://${DOMAIN_TRANSLATION}/
-    return 302 https://${DOMAIN_AUTH}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/logout?post_logout_redirect_uri=https://${DOMAIN_ITSM}/&client_id=${OAUTH2_PROXY_CLIENT_ID};
+    # __SERVICE_DOMAIN__ is replaced with the actual service domain during startup
+    return 302 https://${DOMAIN_AUTH}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/logout?post_logout_redirect_uri=https://__SERVICE_DOMAIN__/&client_id=${OAUTH2_PROXY_CLIENT_ID};
 }
 ```
 
@@ -64,7 +63,7 @@ OAUTH2_PROXY_CLIENT_SECRET=your-secret    # From Keycloak client config
 
 ### OIDC Logout Flow
 
-When a user visits `/oauth2/sign_out` (on either ITSM or Translation service), the following happens:
+When a user visits `/oauth2/sign_out` on any configured service, the following happens:
 
 1. **Django logout view** clears the Django session
 2. **Django** redirects to `/oauth2/sign_out`
@@ -75,7 +74,7 @@ When a user visits `/oauth2/sign_out` (on either ITSM or Translation service), t
 5. **Keycloak** shows logout confirmation (because no `id_token_hint`)
 6. **User clicks "Logout"** on Keycloak page
 7. **Keycloak** terminates the SSO session
-8. **Keycloak** redirects back to `post_logout_redirect_uri` (ITSM or Translation homepage)
+8. **Keycloak** redirects back to `post_logout_redirect_uri` (the service's homepage)
 
 Result: User is fully logged out and must re-enter credentials to log back in.
 
@@ -134,15 +133,15 @@ For each OIDC client in Keycloak, configure the following:
 3. **Valid Redirect URIs**: 
    ```
    https://${DOMAIN_AUTH}/oauth2/callback
-   https://${DOMAIN_ITSM}/*
-   https://${DOMAIN_TRANSLATION}/*
+   https://service1.example.org/*
+   https://service2.example.org/*
    ```
-   Replace with your actual domains from `.env`
+   Replace with your actual service domains from `.env`
 
 4. **Valid Post Logout Redirect URIs**: 
    ```
-   https://${DOMAIN_ITSM}/*
-   https://${DOMAIN_TRANSLATION}/*
+   https://service1.example.org/*
+   https://service2.example.org/*
    https://${DOMAIN_AUTH}/*
    ```
    **⚠️ CRITICAL**: Without these URIs configured, **logout will fail** with "Invalid redirect URI" error.
@@ -152,35 +151,34 @@ For each OIDC client in Keycloak, configure the following:
    2. Scroll down to **Login settings** section
    3. Find **Valid post logout redirect URIs** field
    4. Add each domain where users can be redirected after logout:
-      - `https://itsm.example.org/*`
-      - `https://translation.example.org/*` (if using Translation service)
+      - `https://myapp.example.org/*` (for each configured service)
       - Or use `*` to allow any redirect (less secure)
    5. Click **Save**
 
 5. **Web Origins**: `+` (allows all valid redirect URIs)
 
-### Example for ITSM Client
+### Example Client Configuration
 
 If your `.env` has:
 ```bash
 DOMAIN_AUTH=auth.example.org
-DOMAIN_ITSM=itsm.example.org
+SERVICE_1_DOMAIN=myapp.example.org
 ```
 
 Then configure:
-- **Client ID**: `itsm-client` (matches `OAUTH2_PROXY_CLIENT_ID`)
+- **Client ID**: `myapp-client` (matches `OAUTH2_PROXY_CLIENT_ID`)
 - **Valid Redirect URIs**: 
   - `https://auth.example.org/oauth2/callback`
-  - `https://itsm.example.org/*`
+  - `https://myapp.example.org/*`
 - **Valid Post Logout Redirect URIs**:
-  - `https://itsm.example.org/*`
+  - `https://myapp.example.org/*`
 
 ## Testing the Logout Flow
 
 ### Step-by-Step Verification
 
 1. **Log in to your application**
-   - Access a protected Django page (e.g., `https://itsm.example.org/dashboard/`)
+   - Access a protected Django page (e.g., `https://myapp.example.org/dashboard/`)
    - You should be redirected to Keycloak and prompted to log in
    - After login, you're redirected back to the protected page
 
@@ -257,8 +255,7 @@ sudo docker logs edge_oauth2_proxy 2>&1 | grep -i "end_session\|logout"
 
 **Solutions**:
 1. Add your domain to Keycloak client's "Valid Post Logout Redirect URIs":
-   - `https://itsm.example.org/*`
-   - `https://translation.example.org/*`
+   - `https://myapp.example.org/*` (for each configured service)
 2. Use wildcards as shown above
 3. Verify the `post_logout_redirect_uri` in the nginx template matches a configured URI
 
@@ -283,7 +280,7 @@ sudo docker logs edge_oauth2_proxy 2>&1 | grep -i "end_session\|logout"
 ⚠️ **Important**: When using OIDC RP-Initiated Logout, logging out of one application will terminate the **entire Keycloak SSO session**.
 
 **This means**:
-- User logs out of ITSM → Also logged out of Translation (and any other apps in the same realm)
+- User logs out of ServiceA → Also logged out of ServiceB (and any other apps in the same realm)
 - This is standard SSO behavior (true single sign-on)
 
 **If you need independent logout**:
@@ -296,7 +293,7 @@ sudo docker logs edge_oauth2_proxy 2>&1 | grep -i "end_session\|logout"
 
 - ✅ **Full OIDC Logout (current)**: More secure, complete session termination
   - Users must re-enter credentials after logout
-  - Recommended for sensitive/internal applications (ITSM)
+  - Recommended for sensitive/internal applications
   
 - ❌ **Partial Logout**: Less secure, only clears application cookies
   - Users can re-login with one click (Keycloak session persists)

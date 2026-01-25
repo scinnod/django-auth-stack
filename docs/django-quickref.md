@@ -11,12 +11,12 @@ This stack provides **two scaffold configurations**:
 
 | Pattern | Use Case | nginx Config | Public Pages? |
 |---------|----------|--------------|---------------|
-| **A: Django-Controlled** | Public + protected pages | `itsm.conf.template` | ✅ Yes |
-| **B: Full nginx Auth** | Everything protected | `translation.conf.template` | ❌ No |
+| **A: Django-Controlled** | Public + protected pages | `service-pattern-a.conf.template` | ✅ Yes |
+| **B: Full nginx Auth** | Everything protected | `service-pattern-b.conf.template` | ❌ No |
 
 ---
 
-## Pattern A: Django-Controlled (ITSM)
+## Pattern A: Django-Controlled
 
 ✅ Django decides what's public vs protected  
 ✅ `@login_required` triggers Keycloak  
@@ -70,7 +70,7 @@ def dashboard(request):
 
 ---
 
-## Pattern B: Full nginx Auth (Translation)
+## Pattern B: Full nginx Auth
 
 ✅ Everything protected (including static files)  
 ✅ Simpler Django setup  
@@ -133,8 +133,8 @@ REMOTE_USER_HEADER = 'HTTP_X_REMOTE_USER'
 
 # CSRF trusted origins (for reverse proxy)
 CSRF_TRUSTED_ORIGINS = [
-    'https://itsm.jade.local',
-    'https://auth.jade.local',
+    'https://myapp.example.local',
+    'https://auth.example.local',
 ]
 ```
 
@@ -172,7 +172,7 @@ urlpatterns = i18n_patterns(
 
 **How it works:**
 - User accesses `/de/admin/` (not authenticated)
-- nginx redirects to `/oauth2/start?rd=https://itsm.jade.local/de/admin/`
+- nginx redirects to `/oauth2/start?rd=https://myapp.example.local/de/admin/`
 - After Keycloak login, OAuth2-proxy redirects back to `/de/admin/` (language prefix preserved!)
 - Django receives request with X-Remote-User header and correct language prefix
 - Everything works as expected with `@login_required` decorators
@@ -283,11 +283,11 @@ def debug_auth(request):
 ### Command Line Test
 ```bash
 # Not authenticated - should redirect to Keycloak
-curl -I https://itsm.jade.local/protected/
+curl -I https://myapp.example.local/protected/
 # Expected: HTTP 302 → /oauth2/start
 
 # After login (with cookie)
-curl -H "Cookie: _oauth2_proxy=..." https://itsm.jade.local/protected/
+curl -H "Cookie: _oauth2_proxy=..." https://myapp.example.local/protected/
 # Expected: HTTP 200
 ```
 

@@ -115,7 +115,7 @@ git push -u origin main
 
 ```bash
 # 1. Make your changes to files
-nano nginx/conf.d/itsm.conf
+nano .env
 
 # 2. Check what changed (like hg status)
 git status
@@ -124,11 +124,11 @@ git status
 git diff
 
 # 4. Stage and commit all changes
-git commit -a -m "Update ITSM protected paths"
+git commit -a -m "Update service configuration"
 
 # Alternative: Add specific files only
-git add nginx/conf.d/itsm.conf
-git commit -m "Update ITSM protected paths"
+git add .env
+git commit -m "Add new service"
 
 # Alternative: Add all changes including new files (like hg addremove)
 git add -A

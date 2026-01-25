@@ -10,20 +10,18 @@
 #   - oauth2-proxy: Forward auth middleware for nginx
 #   - postgres: Keycloak database
 #
+# DYNAMIC SERVICE NETWORKS:
+#   Configure services in .env using SERVICE_1_*, SERVICE_2_*, etc.
+#   Run ./scripts/generate-compose-override.sh to create docker-compose.override.yml
+#   with the required external networks.
+#   Note: docker-compose.override.yml is automatically loaded by Docker Compose
+#   when you run "docker compose up" - no need to specify it explicitly.
+#
 # NETWORKS (defense-in-depth segmentation):
 #   - proxy: public-facing, nginx only (auto-created)
 #   - auth_backend (internal): nginx <-> oauth2-proxy <-> keycloak
-#   - itsm_backend (external): nginx <-> itsm_nginx container
-#   - translation_backend (external): nginx <-> translation_nginx container
 #   - keycloak_db (internal): keycloak <-> postgres
-#
-# EXTERNAL NETWORKS must be created manually before starting:
-#   docker network create itsm_backend
-#   docker network create translation_backend
-#
-# These networks are shared with the upstream application containers.
-# On the itsm_backend network, the itsm_nginx container must be accessible.
-# On the translation_backend network, the translation_nginx container must be accessible.
+#   - <service>_backend (external): nginx <-> upstream containers (via override)
 #
 # TLS MODES:
 #   Default: Use provided certificates (mount ./certs/)
@@ -186,14 +184,44 @@ services:
     environment:
       # Domain configuration (substituted in nginx configs at startup)
       DOMAIN_AUTH: ${DOMAIN_AUTH:-auth.example.org}
-      DOMAIN_ITSM: ${DOMAIN_ITSM:-itsm.example.org}
-      DOMAIN_TRANSLATION: ${DOMAIN_TRANSLATION:-translation.example.org}
       # Keycloak realm for logout URL construction
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-master}
       # Cookie domain for clearing oauth2-proxy session on logout
       OAUTH2_PROXY_COOKIE_DOMAIN: ${OAUTH2_PROXY_COOKIE_DOMAIN:-.example.org}
       # OAuth2 client ID for Keycloak logout redirect
       OAUTH2_PROXY_CLIENT_ID: ${OAUTH2_PROXY_CLIENT_ID:-oauth2-proxy}
+      # Service configuration (passed through for dynamic config generation)
+      # Services are configured via SERVICE_1_*, SERVICE_2_*, etc. in .env
+      SERVICE_1_NAME: ${SERVICE_1_NAME:-}
+      SERVICE_1_ENABLED: ${SERVICE_1_ENABLED:-}
+      SERVICE_1_PATTERN: ${SERVICE_1_PATTERN:-}
+      SERVICE_1_DOMAIN: ${SERVICE_1_DOMAIN:-}
+      SERVICE_1_UPSTREAM: ${SERVICE_1_UPSTREAM:-}
+      SERVICE_1_NETWORK: ${SERVICE_1_NETWORK:-}
+      SERVICE_2_NAME: ${SERVICE_2_NAME:-}
+      SERVICE_2_ENABLED: ${SERVICE_2_ENABLED:-}
+      SERVICE_2_PATTERN: ${SERVICE_2_PATTERN:-}
+      SERVICE_2_DOMAIN: ${SERVICE_2_DOMAIN:-}
+      SERVICE_2_UPSTREAM: ${SERVICE_2_UPSTREAM:-}
+      SERVICE_2_NETWORK: ${SERVICE_2_NETWORK:-}
+      SERVICE_3_NAME: ${SERVICE_3_NAME:-}
+      SERVICE_3_ENABLED: ${SERVICE_3_ENABLED:-}
+      SERVICE_3_PATTERN: ${SERVICE_3_PATTERN:-}
+      SERVICE_3_DOMAIN: ${SERVICE_3_DOMAIN:-}
+      SERVICE_3_UPSTREAM: ${SERVICE_3_UPSTREAM:-}
+      SERVICE_3_NETWORK: ${SERVICE_3_NETWORK:-}
+      SERVICE_4_NAME: ${SERVICE_4_NAME:-}
+      SERVICE_4_ENABLED: ${SERVICE_4_ENABLED:-}
+      SERVICE_4_PATTERN: ${SERVICE_4_PATTERN:-}
+      SERVICE_4_DOMAIN: ${SERVICE_4_DOMAIN:-}
+      SERVICE_4_UPSTREAM: ${SERVICE_4_UPSTREAM:-}
+      SERVICE_4_NETWORK: ${SERVICE_4_NETWORK:-}
+      SERVICE_5_NAME: ${SERVICE_5_NAME:-}
+      SERVICE_5_ENABLED: ${SERVICE_5_ENABLED:-}
+      SERVICE_5_PATTERN: ${SERVICE_5_PATTERN:-}
+      SERVICE_5_DOMAIN: ${SERVICE_5_DOMAIN:-}
+      SERVICE_5_UPSTREAM: ${SERVICE_5_UPSTREAM:-}
+      SERVICE_5_NETWORK: ${SERVICE_5_NETWORK:-}
     ports:
       - "80:80"
       - "443:443"
@@ -225,8 +253,8 @@ services:
     networks:
       - proxy           # Public-facing
       - auth_backend    # -> oauth2-proxy & keycloak
-      - itsm_backend    # -> itsm_nginx:8000
-      - translation_backend   # -> translation_nginx:8000
+      # Service networks are added via docker-compose.override.yml
+      # Run: ./scripts/generate-compose-override.sh
     depends_on:
       - oauth2-proxy
       - keycloak
@@ -251,18 +279,13 @@ networks:
     internal: true
     driver: bridge
   
-  # External: nginx <-> itsm_nginx container (must be created manually)
-  itsm_backend:
-    external: true
-  
-  # External: nginx <-> translation_nginx container (must be created manually)
-  translation_backend:
-    external: true
-  
   # Internal: keycloak <-> postgres
   keycloak_db:
     internal: true
     driver: bridge
+  
+  # External service networks are added via docker-compose.override.yml
+  # Run: ./scripts/generate-compose-override.sh
 
 # =============================================================================
 # Volumes

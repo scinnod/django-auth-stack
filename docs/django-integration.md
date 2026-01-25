@@ -9,9 +9,9 @@ This document describes the **standard** Django configuration patterns for integ
 
 ## Two Authentication Patterns
 
-This stack provides **two scaffold configurations** for different use cases:
+This stack provides **two authentication patterns** configured per-service in `.env`:
 
-### Pattern A: Django-Controlled Authentication (ITSM service)
+### Pattern A: Django-Controlled Authentication
 
 **When to use:** You want Django to control which pages are public vs protected.
 
@@ -22,9 +22,14 @@ This stack provides **two scaffold configurations** for different use cases:
 - After Keycloak login, Django session handles subsequent requests
 - **Example:** Public marketing pages, blog, docs; login required for dashboard/admin
 
-**nginx config:** `itsm.conf.template`
+**nginx template:** `service-pattern-a.conf.template`
 
-### Pattern B: Full nginx-Level Authentication (Translation service)
+**Configuration:**
+```bash
+SERVICE_1_PATTERN=A
+```
+
+### Pattern B: Full nginx-Level Authentication
 
 **When to use:** Everything should be protected, no public pages.
 
@@ -35,7 +40,12 @@ This stack provides **two scaffold configurations** for different use cases:
 - Simple, secure, no public access whatsoever
 - **Example:** Internal tools, admin dashboards, confidential services
 
-**nginx config:** `translation.conf.template`
+**nginx template:** `service-pattern-b.conf.template`
+
+**Configuration:**
+```bash
+SERVICE_1_PATTERN=B
+```
 
 ---
 
@@ -344,7 +354,7 @@ urlpatterns = i18n_patterns(
 **Authentication flow with i18n_patterns:**
 1. User accesses `/de/admin/` (German admin interface)
 2. nginx checks auth → not authenticated
-3. nginx redirects to `/oauth2/start?rd=https://itsm.jade.local/de/admin/`
+3. nginx redirects to `/oauth2/start?rd=https://myapp.example.org/de/admin/`
 4. After Keycloak login, OAuth2-proxy redirects back to `/de/admin/`
 5. Language prefix is preserved throughout the flow
 6. Django receives request with both X-Remote-User header and correct language
@@ -353,7 +363,7 @@ urlpatterns = i18n_patterns(
 
 ### 5. Logout Handling
 
-Logout handling works **identically for both Pattern A and Pattern B**. Both `itsm.conf.template` and `translation.conf.template` implement nginx-based OIDC logout.
+Logout handling works **identically for both Pattern A and Pattern B**. Both `service-pattern-a.conf.template` and `service-pattern-b.conf.template` implement nginx-based OIDC logout.
 
 ```python
 from django.contrib.auth import logout
@@ -453,15 +463,15 @@ def debug_auth(request):
 
 ```bash
 # 1. Access protected view (not authenticated)
-curl -I https://itsm.jade.local/admin/
+curl -I https://myapp.example.org/admin/
 # Expected: 302 redirect to /oauth2/start
 
 # 2. After Keycloak login, access again with cookie
-curl -H "Cookie: _oauth2_proxy=..." https://itsm.jade.local/admin/
+curl -H "Cookie: _oauth2_proxy=..." https://myapp.example.org/admin/
 # Expected: 200 OK, rendered page
 
 # 3. Check Django sees authenticated user
-curl -H "Cookie: _oauth2_proxy=..." https://itsm.jade.local/debug_auth
+curl -H "Cookie: _oauth2_proxy=..." https://myapp.example.org/debug_auth
 # Expected: {"username": "john.doe", "is_authenticated": true}
 # Note: Username is from Keycloak's preferred_username claim, not UUID
 ```
@@ -493,27 +503,27 @@ urlpatterns = [
 ### 2. **Current Setup** (Secure ✅)
 
 ```yaml
-# docker-compose.yml
+# docker-compose.yml (for your Django service)
 services:
   nginx:
     networks:
-      - auth_backend    # Can talk to oauth2-proxy
-      - itsm_backend    # Can talk to itsm_nginx
+      - auth_backend       # Can talk to oauth2-proxy
+      - myapp_backend      # Can talk to myapp_nginx
   
   oauth2_proxy:
     networks:
-      - auth_backend    # Can talk to nginx, keycloak
-      - keycloak_net    # Internal only
+      - auth_backend       # Can talk to nginx, keycloak
+      - keycloak_net       # Internal only
   
-  itsm_nginx:  # Your Django container
+  myapp_nginx:  # Your Django container
     networks:
-      - itsm_backend    # ONLY accessible via nginx
+      - myapp_backend      # ONLY accessible via nginx
     # NOT exposed to host network
 ```
 
 This setup is secure because:
 - Django container is NOT exposed to host (`ports:` is missing)
-- Django container is on isolated `itsm_backend` network
+- Django container is on isolated `<service>_backend` network
 - ONLY nginx can reach Django container
 - Users cannot bypass nginx to send forged headers
 
@@ -521,7 +531,7 @@ This setup is secure because:
 
 ```python
 # settings.py
-ALLOWED_HOSTS = ['itsm.jade.local']
+ALLOWED_HOSTS = ['myapp.example.local']
 
 # Middleware to validate headers come from trusted proxy
 class ValidateProxyHeadersMiddleware:
@@ -533,7 +543,7 @@ class ValidateProxyHeadersMiddleware:
     
     def __call__(self, request):
         # Check for nginx-specific header
-        if request.META.get('HTTP_X_FORWARDED_HOST') != 'itsm.jade.local':
+        if request.META.get('HTTP_X_FORWARDED_HOST') != 'myapp.example.local':
             # Request didn't come through nginx - reject it
             return HttpResponseForbidden("Direct access forbidden")
         
@@ -613,9 +623,8 @@ def logout_view(request):
 **Additional checks:**
 1. Verify OAuth2-proxy configuration includes `--pass-user-headers=true` (already in docker-compose.yml)
 2. Check Keycloak client settings:
-   - \"Valid Post Logout Redirect URIs\" must include your domains:
-     - `https://itsm.example.org/*`
-     - `https://translation.example.org/*`
+   - \"Valid Post Logout Redirect URIs\" must include your service domains:
+     - `https://myapp.example.org/*` (for each configured service)
 3. Check nginx logs: `sudo docker logs edge_nginx --tail 50`
 4. See [keycloak-logout.md](keycloak-logout.md) for detailed troubleshooting
 
@@ -635,8 +644,8 @@ Django's CSRF protection expects forms to have CSRF tokens, which may not work c
 # settings.py
 # Trust CSRF token from cookies (set by OAuth2-proxy)
 CSRF_TRUSTED_ORIGINS = [
-    'https://itsm.jade.local',
-    'https://auth.jade.local',
+    'https://myapp.example.local',
+    'https://auth.example.local',
 ]
 
 # Optional: Use more lenient CSRF for reverse proxy setups

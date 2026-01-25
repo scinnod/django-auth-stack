@@ -1,33 +1,36 @@
 # =============================================================================
-# Translation Service Virtual Host Configuration (Keycloak + OAuth2 Proxy)
+# Service Virtual Host Configuration - Pattern B (Full nginx-Level Auth)
 # =============================================================================
 # Copyright (C) 2024-2026 David Kleinhans, Jade University of Applied Sciences
 # SPDX-License-Identifier: Apache-2.0
 # =============================================================================
-# AUTHENTICATION PATTERN: Full nginx-Level Authentication
+# AUTHENTICATION PATTERN B: Full nginx-Level Authentication
 #
 # This configuration requires Keycloak login for ALL requests (including static
 # files, images, etc.). Useful for fully secured services where nothing should
 # be publicly accessible.
 #
-# Domain: ${DOMAIN_TRANSLATION} (e.g., translation.jade.local)
-# Upstream: translation_nginx:8000 (external Docker container on translation_backend network)
+# Domain: __SERVICE_DOMAIN__ (substituted at runtime)
+# Upstream: __SERVICE_UPSTREAM__ (external Docker container on __SERVICE_NETWORK__)
 #
 # How it works:
-#   1. Every request checked by OAuth2-proxy before reaching Django
+#   1. Every request checked by OAuth2-proxy before reaching upstream
 #   2. If not authenticated, redirect to Keycloak login
-#   3. After Keycloak login, nginx passes X-Remote-User header to Django
-#   4. Django RemoteUserMiddleware creates session from header
+#   3. After Keycloak login, nginx passes X-Remote-User header to upstream
+#   4. Upstream receives authenticated user headers for all requests
 #   5. All subsequent requests also checked (fast cookie validation)
 #
-# Alternative Pattern: See itsm.conf.template for Django-controlled authentication
+# Note: This pattern works with any upstream service, not just Django.
+# For Django: Add RemoteUserMiddleware to read X-Remote-User header.
+#
+# Alternative Pattern: See service-pattern-a.conf.template for Django-controlled auth
 # (where Django decides which pages are public vs protected)
 # =============================================================================
 
 server {
     listen 80;
     listen [::]:80;
-    server_name ${DOMAIN_TRANSLATION};
+    server_name __SERVICE_DOMAIN__;
     
     # Redirect HTTP -> HTTPS
     location / {
@@ -38,7 +41,7 @@ server {
 server {
     listen 443 ssl;
     listen [::]:443 ssl;
-    server_name ${DOMAIN_TRANSLATION};
+    server_name __SERVICE_DOMAIN__;
 
     # -------------------------------------------------------------------------
     # TLS Configuration
@@ -54,8 +57,8 @@ server {
     # -------------------------------------------------------------------------
     # Logging (with authentication info)
     # -------------------------------------------------------------------------
-    access_log /var/log/nginx/translation.example.org.access.log auth;
-    error_log /var/log/nginx/translation.example.org.error.log warn;
+    access_log /var/log/nginx/__SERVICE_NAME__.access.log auth;
+    error_log /var/log/nginx/__SERVICE_NAME__.error.log warn;
 
     # -------------------------------------------------------------------------
     # OAuth2 Proxy Integration
@@ -66,7 +69,7 @@ server {
     # Solution: nginx clears cookie AND redirects to Keycloak's end_session_endpoint
     #
     # Flow:
-    #   1. User hits /oauth2/sign_out (or Django logout redirects here)
+    #   1. User hits /oauth2/sign_out (or upstream logout redirects here)
     #   2. nginx clears the _oauth2_proxy cookie
     #   3. nginx redirects to Keycloak's end_session_endpoint
     #   4. Keycloak terminates the SSO session
@@ -82,7 +85,7 @@ server {
         # Redirect to Keycloak's end_session_endpoint
         # post_logout_redirect_uri tells Keycloak where to send user after logout
         # This URI must be configured in Keycloak client's "Valid post logout redirect URIs"
-        return 302 https://${DOMAIN_AUTH}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/logout?post_logout_redirect_uri=https://${DOMAIN_TRANSLATION}/&client_id=${OAUTH2_PROXY_CLIENT_ID};
+        return 302 https://${DOMAIN_AUTH}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/logout?post_logout_redirect_uri=https://__SERVICE_DOMAIN__/&client_id=${OAUTH2_PROXY_CLIENT_ID};
     }
     
     # All other OAuth2 endpoints (auth, start, callback) go to oauth2-proxy
@@ -122,6 +125,6 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-Host $host;
         
-        proxy_pass http://translation_nginx:8000;
+        proxy_pass http://__SERVICE_UPSTREAM__;
     }
 }

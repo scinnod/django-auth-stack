@@ -5,10 +5,16 @@
 # Copyright (C) 2024-2026 David Kleinhans, Jade University of Applied Sciences
 # SPDX-License-Identifier: Apache-2.0
 # =============================================================================
-# This script initializes the .env file with secure random values.
-# - Copies .env.example to .env if it doesn't exist
+# This script initializes the .env file with secure random values and
+# configures upstream services dynamically.
+#
+# Features:
 # - Generates secure random passwords and keys
-# - Replaces placeholder values automatically
+# - Configures any number of upstream services (0 to N)
+# - Supports two authentication patterns per service:
+#   - Pattern A: Django-controlled (public pages + protected areas)
+#   - Pattern B: Full nginx-level auth (everything protected)
+# - Per-service enable/disable toggle
 #
 # Usage:
 #   chmod +x scripts/init-env.sh
@@ -22,6 +28,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # =============================================================================
@@ -42,6 +49,10 @@ log_error() {
 
 log_step() {
     echo -e "${BLUE}[STEP]${NC} $1"
+}
+
+log_service() {
+    echo -e "${CYAN}[SERVICE]${NC} $1"
 }
 
 generate_password() {
@@ -155,33 +166,128 @@ log_warn "For development: use .local domains (e.g., .example.local)"
 log_warn "For production: use actual domains (e.g., .example.com)"
 echo ""
 read -p "Auth domain [auth.example.local]: " domain_auth
-read -p "ITSM domain [itsm.example.local]: " domain_itsm
-read -p "Translation domain [translation.example.local]: " domain_translation
+domain_auth=${domain_auth:-auth.example.local}
 
-if [ -n "$domain_auth" ]; then
-    $SED_INPLACE "s|DOMAIN_AUTH=auth.example.local|DOMAIN_AUTH=${domain_auth}|g" .env
-    log_info "Set DOMAIN_AUTH to ${domain_auth}"
-    
-    # Extract base domain for cookie (e.g., auth.example.local -> .example.local)
-    cookie_domain=".${domain_auth#*.}"
+$SED_INPLACE "s|DOMAIN_AUTH=auth.example.local|DOMAIN_AUTH=${domain_auth}|g" .env
+log_info "Set DOMAIN_AUTH to ${domain_auth}"
+
+# Extract base domain for cookie (e.g., auth.example.local -> .example.local)
+cookie_domain=".${domain_auth#*.}"
+echo ""
+read -p "Cookie domain for SSO [${cookie_domain}]: " input_cookie_domain
+cookie_domain=${input_cookie_domain:-$cookie_domain}
+$SED_INPLACE "s|OAUTH2_PROXY_COOKIE_DOMAIN=.example.local|OAUTH2_PROXY_COOKIE_DOMAIN=${cookie_domain}|g" .env
+log_info "Set OAUTH2_PROXY_COOKIE_DOMAIN to ${cookie_domain}"
+
+# =============================================================================
+# Service Configuration
+# =============================================================================
+
+echo ""
+log_step "=========================================="
+log_step "Upstream Service Configuration"
+log_step "=========================================="
+echo ""
+log_info "Configure the services you want to protect with Keycloak authentication."
+log_info "You can add any number of services (0 or more)."
+echo ""
+log_info "Authentication Patterns:"
+log_info "  Pattern A: Django-controlled auth"
+log_info "             - Django decides what's public vs protected"
+log_info "             - Use @login_required for protected pages"
+log_info "             - Good for apps with public + private areas"
+echo ""
+log_info "  Pattern B: Full nginx-level auth"
+log_info "             - ALL requests require authentication"
+log_info "             - Everything protected, no public access"
+log_info "             - Good for internal tools, admin panels"
+echo ""
+
+# Remove placeholder service configs from .env
+$SED_INPLACE '/^# Service 1 Example/d' .env
+$SED_INPLACE '/^SERVICE_1_/d' .env
+$SED_INPLACE '/^# Service 2 Example/d' .env
+$SED_INPLACE '/^SERVICE_2_/d' .env
+
+# Collect services
+declare -a services
+service_num=0
+
+while true; do
     echo ""
-    read -p "Cookie domain for SSO [${cookie_domain}]: " input_cookie_domain
-    cookie_domain=${input_cookie_domain:-$cookie_domain}
-    $SED_INPLACE "s|OAUTH2_PROXY_COOKIE_DOMAIN=.example.local|OAUTH2_PROXY_COOKIE_DOMAIN=${cookie_domain}|g" .env
-    log_info "Set OAUTH2_PROXY_COOKIE_DOMAIN to ${cookie_domain}"
+    read -p "Add a service? (y/N): " -n 1 -r add_service
+    echo
+    
+    if [[ ! $add_service =~ ^[Yy]$ ]]; then
+        break
+    fi
+    
+    service_num=$((service_num + 1))
+    
+    echo ""
+    log_service "Configuring Service #${service_num}"
+    echo ""
+    
+    # Service name (used for config filename and logging)
+    read -p "  Service name (e.g., itsm, myapp, dashboard): " svc_name
+    if [ -z "$svc_name" ]; then
+        log_warn "Service name required, skipping this service"
+        service_num=$((service_num - 1))
+        continue
+    fi
+    # Sanitize name (lowercase, alphanumeric and underscores only)
+    svc_name=$(echo "$svc_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_]/_/g')
+    
+    # Domain
+    default_domain="${svc_name}${cookie_domain#.}"
+    read -p "  Domain [${default_domain}]: " svc_domain
+    svc_domain=${svc_domain:-$default_domain}
+    
+    # Upstream (container:port)
+    default_upstream="${svc_name}_nginx:8000"
+    read -p "  Upstream container:port [${default_upstream}]: " svc_upstream
+    svc_upstream=${svc_upstream:-$default_upstream}
+    
+    # Network
+    default_network="${svc_name}_backend"
+    read -p "  Docker network [${default_network}]: " svc_network
+    svc_network=${svc_network:-$default_network}
+    
+    # Pattern
+    echo ""
+    echo "  Authentication pattern:"
+    echo "    A = Django-controlled (recommended for Django apps)"
+    echo "    B = Full nginx-level auth (for internal tools)"
+    read -p "  Pattern (A/B) [A]: " svc_pattern
+    svc_pattern=${svc_pattern:-A}
+    svc_pattern=$(echo "$svc_pattern" | tr '[:lower:]' '[:upper:]')
+    
+    # Enabled
+    read -p "  Enable this service? (Y/n): " -n 1 -r svc_enabled
+    echo
+    if [[ $svc_enabled =~ ^[Nn]$ ]]; then
+        svc_enabled="false"
+    else
+        svc_enabled="true"
+    fi
+    
+    # Add to .env file
+    echo "" >> .env
+    echo "# --- Service ${service_num}: ${svc_name} ---" >> .env
+    echo "SERVICE_${service_num}_NAME=${svc_name}" >> .env
+    echo "SERVICE_${service_num}_ENABLED=${svc_enabled}" >> .env
+    echo "SERVICE_${service_num}_PATTERN=${svc_pattern}" >> .env
+    echo "SERVICE_${service_num}_DOMAIN=${svc_domain}" >> .env
+    echo "SERVICE_${service_num}_UPSTREAM=${svc_upstream}" >> .env
+    echo "SERVICE_${service_num}_NETWORK=${svc_network}" >> .env
+    
+    log_info "Added service: ${svc_name} (Pattern ${svc_pattern}, enabled=${svc_enabled})"
+done
+
+if [ $service_num -eq 0 ]; then
+    log_warn "No services configured. You can add them later by editing .env"
+    log_info "See .env.example for the SERVICE_* variable format."
 fi
-
-if [ -n "$domain_itsm" ]; then
-    $SED_INPLACE "s|DOMAIN_ITSM=itsm.example.local|DOMAIN_ITSM=${domain_itsm}|g" .env
-    log_info "Set DOMAIN_ITSM to ${domain_itsm}"
-fi
-
-if [ -n "$domain_translation" ]; then
-    $SED_INPLACE "s|DOMAIN_TRANSLATION=translation.example.local|DOMAIN_TRANSLATION=${domain_translation}|g" .env
-    log_info "Set DOMAIN_TRANSLATION to ${domain_translation}"
-fi
-
-
 
 # =============================================================================
 # Completion
@@ -197,6 +303,9 @@ log_info "Generated secure random values for:"
 log_info "  - POSTGRES_PASSWORD"
 log_info "  - KEYCLOAK_ADMIN_PASSWORD"
 log_info "  - OAUTH2_PROXY_COOKIE_SECRET"
+if [ $service_num -gt 0 ]; then
+    log_info "Configured $service_num service(s)"
+fi
 echo ""
 log_warn "IMPORTANT: Keep .env file secure - it contains sensitive credentials!"
 echo ""
@@ -207,9 +316,18 @@ echo ""
 log_info "1. Review and verify .env file:"
 log_info "     nano .env"
 echo ""
-log_info "2. Create Docker networks:"
-log_info "     docker network create itsm_backend"
-log_info "     docker network create translation_backend"
+if [ $service_num -gt 0 ]; then
+    log_info "2. Create Docker networks for your services:"
+    for i in $(seq 1 $service_num); do
+        eval svc_network="\${SERVICE_${i}_NETWORK:-}"
+        if [ -n "$svc_network" ]; then
+            log_info "     docker network create ${svc_network}"
+        fi
+    done
+else
+    log_info "2. Create Docker networks for any services you add later:"
+    log_info "     docker network create <service>_backend"
+fi
 echo ""
 log_info "3. Start the stack and access Keycloak:"
 log_info "     docker compose up -d"
