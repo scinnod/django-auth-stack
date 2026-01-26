@@ -15,47 +15,16 @@ limitations under the License.
 
 ===============================================================================
 
-This product includes or integrates with the following third-party software:
+Contributions
 
--------------------------------------------------------------------------------
-Keycloak
-Copyright (C) Red Hat, Inc.
-Licensed under the Apache License, Version 2.0
-https://www.keycloak.org/
-https://github.com/keycloak/keycloak
+This project was created and is maintained by David Kleinhans at the
+Jade University of Applied Sciences, Oldenburg, Germany.
 
-Keycloak is an open source identity and access management solution that
-provides SSO, identity brokering, and social login capabilities.
+===============================================================================
 
--------------------------------------------------------------------------------
-nginx
-Copyright (C) 2002-2024 Igor Sysoev
-Copyright (C) 2011-2024 Nginx, Inc.
-Licensed under the BSD 2-Clause License
-https://nginx.org/
-https://github.com/nginx/nginx
+Third-Party Components
 
-nginx is a high-performance HTTP server and reverse proxy.
-
--------------------------------------------------------------------------------
-OAuth2 Proxy
-Copyright (C) OAuth2 Proxy Contributors
-Licensed under the MIT License
-https://oauth2-proxy.github.io/oauth2-proxy/
-https://github.com/oauth2-proxy/oauth2-proxy
-
-OAuth2 Proxy is a reverse proxy that provides authentication with Google,
-GitHub, and other providers via OAuth 2.0 and OpenID Connect.
-
--------------------------------------------------------------------------------
-PostgreSQL
-Copyright (C) 1996-2024, PostgreSQL Global Development Group
-Licensed under the PostgreSQL License
-https://www.postgresql.org/
-
-PostgreSQL is a powerful, open source object-relational database system.
-
--------------------------------------------------------------------------------
-
-For complete license information for each dependency, please refer to the
-respective project's license file or documentation.
+This project uses Docker images for Keycloak, nginx, OAuth2 Proxy, and
+PostgreSQL. These components are pulled by users at runtime and are not
+included in this distribution. Users are responsible for complying with
+the respective licenses of these components.
