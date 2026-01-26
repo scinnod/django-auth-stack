@@ -111,8 +111,8 @@ server {
         add_header Set-Cookie $auth_cookie;
         
         # Note: OAuth2-proxy provides separate headers for username and email
-        # - X-Auth-Request-Preferred-Username = Keycloak username (e.g., davidkl)
-        # - X-Auth-Request-Email = Keycloak email (e.g., david.kleinhans@jade-hs.de)
+        # - X-Auth-Request-Preferred-Username = Keycloak username (e.g., jsmith)
+        # - X-Auth-Request-Email = Keycloak email (e.g., jsmith@example.com)
         proxy_set_header X-Auth-Request-User $preferred_username;
         proxy_set_header X-Auth-Request-Email $email;
         proxy_set_header X-Remote-User $preferred_username;

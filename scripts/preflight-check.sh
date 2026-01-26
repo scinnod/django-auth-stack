@@ -104,7 +104,7 @@ check_writable() {
 
 echo ""
 echo "=========================================="
-echo "Edge-Auth Stack - Pre-flight Checks"
+echo "Django Auth Stack - Pre-flight Checks"
 echo "=========================================="
 echo ""
 echo "Project directory: $PROJECT_DIR"

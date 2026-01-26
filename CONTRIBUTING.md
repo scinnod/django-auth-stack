@@ -5,7 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # Contributing
 
-This is an open-source project developed at [Jade University of Applied Sciences](https://www.jade-hs.de/).
+This is an open-source project. Contributions are welcome!
 
 Contributions are welcome! However, please note that this is a **university infrastructure project** with limited resources for support.
 
@@ -61,6 +61,6 @@ By contributing, you agree that your contributions will be licensed under the [A
 
 ## Contact
 
-For security vulnerabilities, please email directly: david.kleinhans@jade-hs.de
+For security vulnerabilities, please see [SECURITY.md](SECURITY.md).
 
 For general questions, please open a GitHub issue.

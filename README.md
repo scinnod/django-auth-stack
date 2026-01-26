@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: 2024-2026 David Kleinhans, Jade University of Applied Sc
 SPDX-License-Identifier: Apache-2.0
 -->
 
-# Edge-Auth Stack: nginx + Keycloak SSO
+# Django Auth Stack: nginx + Keycloak SSO
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)](https://docs.docker.com/compose/)

@@ -7,8 +7,8 @@ SPDX-License-Identifier: Apache-2.0
 
 ## Reporting Vulnerabilities
 
-Please report security vulnerabilities privately via email to:
-**david.kleinhans@jade-hs.de**
+Please report security vulnerabilities privately by opening a security advisory on GitHub:
+https://github.com/scinnod/django-auth-stack/security/advisories/new
 
 Do not open public issues for security vulnerabilities.
 

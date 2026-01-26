@@ -199,8 +199,8 @@ REMOTE_USER_HEADER = 'HTTP_X_REMOTE_USER'
 ### User Identification & Email Handling
 
 Nginx passes two separate headers from OAuth2-proxy to Django:
-- `X-Remote-User` header → Keycloak username (e.g., `davidkl`) from the `preferred_username` claim
-- `X-Remote-Email` header → Keycloak email (e.g., `david.kleinhans@jade-hs.de`) from the `email` claim
+- `X-Remote-User` header → Keycloak username (e.g., `jsmith`) from the `preferred_username` claim
+- `X-Remote-Email` header → Keycloak email (e.g., `jsmith@example.com`) from the `email` claim
 
 **Implications for Django:**
 1. Django will create users with the actual Keycloak username (e.g., `davidkl`)
@@ -289,8 +289,8 @@ AUTHENTICATION_BACKENDS = [
 ```
 
 **Result:** Django creates users with:
-- `username` = `davidkl` (from Keycloak)
-- `email` = `david.kleinhans@jade-hs.de` (from Keycloak)
+- `username` = `jsmith` (from Keycloak)
+- `email` = `jsmith@example.com` (from Keycloak)
 ```
 
 ### 2. Understanding `@login_required` Behavior

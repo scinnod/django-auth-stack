@@ -71,7 +71,7 @@ generate_secret_key() {
 
 echo ""
 log_info "=========================================="
-log_info "Edge-Auth Stack - Environment Setup"
+log_info "Django Auth Stack - Environment Setup"
 log_info "=========================================="
 echo ""
 

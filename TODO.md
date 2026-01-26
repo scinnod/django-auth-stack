@@ -7,16 +7,17 @@ SPDX-License-Identifier: Apache-2.0
 
 ## ✅ Completed
 
-- [x] **SECURITY.md** - Added contact email (david.kleinhans@jade-hs.de)
-- [x] **LICENSE** - Full Apache-2.0 with copyright attribution to David Kleinhans, Jade University
+- [x] **SECURITY.md** - Added security contact information
+- [x] **LICENSE** - Full Apache-2.0 with copyright attribution to David Kleinhans
 - [x] **NOTICE** - Created with Apache-2.0 notice and third-party component licenses
-- [x] **CONTRIBUTING.md** - University infrastructure guidelines added, Apache-2.0 license
+- [x] **CONTRIBUTING.md** - Open source contribution guidelines, Apache-2.0 license
 - [x] **License headers** - Updated all SPDX headers from AGPL-3.0-or-later to Apache-2.0
 - [x] **Documentation** - Restructured into docs/ folder with consistent naming
 - [x] **README** - Updated license badge and license section to Apache-2.0
 - [x] **Third-party licenses** - Docker images pulled by users don't require licensing attribution
 - [x] **SPDX headers** - All shipped files have proper Apache-2.0 headers
-- [x] **Author information** - Updated with full affiliation and contact email
+- [x] **Author information** - Updated copyright information
+- [x] **Project name** - Renamed to django-auth-stack for GitHub publication (scinnod/django-auth-stack)
 
 ## Before Publishing
 
@@ -27,8 +28,7 @@ SPDX-License-Identifier: Apache-2.0
 
 ## Domain Names
 
-The docs use `jade.local` as example domains, which is appropriate for the Jade University context.
-This is intentional and shows a real-world setup.
+The docs use `example.local` as example domains. Users should customize these for their own deployment.
 
 ## Repository Settings (GitHub)
 

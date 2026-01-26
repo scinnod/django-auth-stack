@@ -1,5 +1,5 @@
 # =============================================================================
-# Edge-Auth Stack: nginx reverse proxy + Keycloak SSO
+# Django Auth Stack: nginx reverse proxy + Keycloak SSO
 # =============================================================================
 # Copyright (C) 2024-2026 David Kleinhans, Jade University of Applied Sciences
 # SPDX-License-Identifier: Apache-2.0

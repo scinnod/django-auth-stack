@@ -112,8 +112,8 @@ fi
 log_info "Creating dummy certificates for initial nginx startup..."
 
 # Create volume if it doesn't exist
-docker volume create edge-auth_certbot_certs > /dev/null 2>&1 || true
-docker volume create edge-auth_certbot_webroot > /dev/null 2>&1 || true
+docker volume create django-auth_certbot_certs > /dev/null 2>&1 || true
+docker volume create django-auth_certbot_webroot > /dev/null 2>&1 || true
 
 # Generate dummy certificates for each domain
 for domain in "${DOMAINS[@]}"; do

@@ -50,7 +50,7 @@ A practical guide for using Git with this project, tailored for users coming fro
 
 ### 1. Initialize Git Repository
 ```bash
-cd /home/da1061/docker/jade-prod/0_nginx_auth_keykloak
+cd /path/to/django-auth-stack
 
 # Initialize git repo (like hg init)
 git init
@@ -66,7 +66,7 @@ git branch -M main
 ### 2. Create Private GitHub Repository
 
 1. Go to https://github.com/new
-2. Repository name: `edge-auth-stack` (or your choice)
+2. Repository name: `django-auth-stack` (or your choice)
 3. **Privacy**: Select "Private"
 4. **DON'T** initialize with README (we already have files)
 5. Click "Create repository"
@@ -75,7 +75,7 @@ git branch -M main
 
 ```bash
 # Add GitHub as remote (like adding a path in hg)
-git remote add origin git@github.com:YOUR_USERNAME/edge-auth-stack.git
+git remote add origin git@github.com:scinnod/django-auth-stack.git
 
 # Verify remote
 git remote -v
@@ -103,7 +103,7 @@ git add -A
 git status
 
 # Commit
-git commit -m "Initial commit: Edge-auth stack with nginx + Keycloak"
+git commit -m "Initial commit: Django Auth Stack with nginx + Keycloak"
 
 # Push to GitHub
 git push -u origin main
@@ -144,11 +144,11 @@ git push
 # SSH to production server
 ssh production-server
 
-cd /path/to/edge-auth-stack
+cd /path/to/django-auth-stack
 
 # First time only: Clone from GitHub
-git clone git@github.com:YOUR_USERNAME/edge-auth-stack.git
-cd edge-auth-stack
+git clone git@github.com:scinnod/django-auth-stack.git
+cd django-auth-stack
 
 # Subsequent updates: Pull latest changes
 git pull

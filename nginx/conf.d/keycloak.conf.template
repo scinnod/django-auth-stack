@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # =============================================================================
 # This serves the Keycloak admin console and OAuth2/OIDC endpoints
-# Domain: ${DOMAIN_AUTH} (e.g., auth.jade.local)
+# Domain: ${DOMAIN_AUTH} (e.g., auth.example.local)
 # =============================================================================
 
 server {
