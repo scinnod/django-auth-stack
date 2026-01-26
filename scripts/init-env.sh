@@ -316,8 +316,11 @@ echo ""
 log_info "1. Review and verify .env file:"
 log_info "     nano .env"
 echo ""
+log_info "2. Generate Docker Compose override for service networks:"
+log_info "     ./scripts/generate-compose-override.sh"
+echo ""
 if [ $service_num -gt 0 ]; then
-    log_info "2. Create Docker networks for your services:"
+    log_info "3. Create Docker networks for your services:"
     for i in $(seq 1 $service_num); do
         eval svc_network="\${SERVICE_${i}_NETWORK:-}"
         if [ -n "$svc_network" ]; then
@@ -325,11 +328,11 @@ if [ $service_num -gt 0 ]; then
         fi
     done
 else
-    log_info "2. Create Docker networks for any services you add later:"
+    log_info "3. Create Docker networks for any services you add later:"
     log_info "     docker network create <service>_backend"
 fi
 echo ""
-log_info "3. Start the stack and access Keycloak:"
+log_info "4. Start the stack and access Keycloak:"
 log_info "     docker compose up -d"
 log_info "     Access: https://${domain_auth:-auth.example.local}"
 log_info "     Username: admin"

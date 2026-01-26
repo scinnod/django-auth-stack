@@ -331,12 +331,18 @@ openssl rand -base64 20
 
 4. **Login settings**:
    - Root URL: `https://auth.example.local`
-   - Valid redirect URIs:
+   - **Valid redirect URIs** (list each domain explicitly - wildcards may cause issues):
      ```
      https://auth.example.local/oauth2/callback
-     https://*.example.local/oauth2/callback
+     https://app1.example.local/oauth2/callback
+     https://app2.example.local/oauth2/callback
      ```
-     (Or list each service domain explicitly)
+   - **Valid post logout redirect URIs** (required for proper logout):
+     ```
+     https://auth.example.local/*
+     https://app1.example.local/*
+     https://app2.example.local/*
+     ```
    - Web origins: `+` (allows all valid redirect URIs)
    - Click **Save**
 
