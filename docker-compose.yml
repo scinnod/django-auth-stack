@@ -190,6 +190,8 @@ services:
       OAUTH2_PROXY_COOKIE_DOMAIN: ${OAUTH2_PROXY_COOKIE_DOMAIN:-.example.org}
       # OAuth2 client ID for Keycloak logout redirect
       OAUTH2_PROXY_CLIENT_ID: ${OAUTH2_PROXY_CLIENT_ID:-oauth2-proxy}
+      # Keycloak admin allowed IPs (space-separated list)
+      KEYCLOAK_ADMIN_ALLOWED_IPS: ${KEYCLOAK_ADMIN_ALLOWED_IPS:-}
       # Service configuration (passed through for dynamic config generation)
       # Services are configured via SERVICE_1_*, SERVICE_2_*, etc. in .env
       SERVICE_1_NAME: ${SERVICE_1_NAME:-}
