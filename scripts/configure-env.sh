@@ -454,7 +454,12 @@ if $IS_RECONFIGURE && [ ${#EXISTING_SERVICES[@]} -gt 0 ]; then
         echo "  Enabled:  $svc_enabled"
         echo ""
         
-        read -p "  Action: [K]eep / [E]dit / [D]isable / [R]emove? [K]: " action
+        # Show appropriate toggle option based on current state
+        if [ "$svc_enabled" == "true" ]; then
+            read -p "  Action: [K]eep / [E]dit / [D]isable / [R]emove? [K]: " action
+        else
+            read -p "  Action: [K]eep / [E]dit / [N]nable / [R]emove? [K]: " action
+        fi
         action="${action:-K}"
         action=$(echo "$action" | tr '[:lower:]' '[:upper:]')
         
@@ -491,6 +496,11 @@ if $IS_RECONFIGURE && [ ${#EXISTING_SERVICES[@]} -gt 0 ]; then
                 # Disable (keep config but set enabled=false)
                 SERVICES_CONFIG+=("$svc_name|false|$svc_pattern|$svc_domain|$svc_upstream|$svc_network")
                 log_info "  Disabled service: $svc_name"
+                ;;
+            N)
+                # Enable (keep config but set enabled=true)
+                SERVICES_CONFIG+=("$svc_name|true|$svc_pattern|$svc_domain|$svc_upstream|$svc_network")
+                log_info "  Enabled service: $svc_name"
                 ;;
             R)
                 # Remove - don't add to SERVICES_CONFIG
