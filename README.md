@@ -47,10 +47,11 @@ Internet
    ↓
 nginx (TLS termination, reverse proxy)
    ↓
-   ├─→ Public paths (Pattern A) → Upstream Apps
-   ↓
-   ├─→ Protected paths → OAuth2 Proxy → Keycloak → Upstream Apps
-   ↓
+   ├─→ Pattern A: Public paths → Upstream Apps (Django controls auth)
+   │              Protected paths → OAuth2 Proxy → Keycloak → Upstream Apps
+   │
+   ├─→ Pattern B: ALL paths → OAuth2 Proxy → Keycloak → Upstream Apps
+   │
    └─→ auth.example.local → Keycloak Admin Console
 ```
 
