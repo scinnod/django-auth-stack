@@ -54,3 +54,22 @@ KEYCLOAK_ADMIN_ALLOWED_IPS=127.0.0.1 ::1              # Localhost only (SSH tunn
 ```
 
 See [README.md](README.md#keycloak-admin-console-security) for detailed configuration.
+
+## Configuration Maintenance
+
+Keeping your configuration up-to-date is important for security. Use the configuration script to safely update settings:
+
+```bash
+./scripts/configure-env.sh
+```
+
+The script:
+- Preserves existing secrets by default (requires explicit `YES` confirmation to regenerate)
+- Shows current values as defaults for easy review
+- Creates a backup before saving changes
+- Generates a clean `.env` file with consistent structure
+
+**Recommended practices:**
+- Review configuration periodically, especially after updates
+- Use IP restriction for admin console on public servers
+- Run `./scripts/preflight-check.sh` to verify security settings

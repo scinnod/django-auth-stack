@@ -122,11 +122,14 @@ if [ -f "$PROJECT_DIR/.env" ]; then
     # Check for placeholder values
     if grep -q "CHANGE_ME\|REPLACE_WITH" "$PROJECT_DIR/.env" 2>/dev/null; then
         log_warn ".env contains placeholder values that need to be replaced"
+        log_info "  Run: ./scripts/configure-env.sh to update configuration"
     fi
 else
     log_error ".env file missing"
     if $FIX_MODE && [ -f "$PROJECT_DIR/.env.example" ]; then
-        log_fix "Run: ./scripts/init-env.sh"
+        log_fix "Run: ./scripts/configure-env.sh"
+    else
+        log_info "  Run: ./scripts/configure-env.sh to create configuration"
     fi
 fi
 
@@ -407,7 +410,7 @@ if [ "$DOCKER_AVAILABLE" = true ]; then
     
     if [ $networks_checked -eq 0 ]; then
         log_warn "No services configured in .env"
-        log_info "  Configure services with SERVICE_1_*, SERVICE_2_*, etc."
+        log_info "  Run: ./scripts/configure-env.sh to add services"
     fi
 else
     echo ""
@@ -439,8 +442,8 @@ else
     if [ -n "${DOMAIN_AUTH:-}" ]; then
         if [[ "$DOMAIN_AUTH" != *.local && "$DOMAIN_AUTH" != *localhost* ]]; then
             log_warn "KEYCLOAK_ADMIN_ALLOWED_IPS not set (public domain detected)"
-            log_info "  For production servers, restrict admin access to trusted IPs:"
-            log_info "  KEYCLOAK_ADMIN_ALLOWED_IPS=\"10.0.0.0/8 192.168.0.0/16\""
+            log_info "  For production servers, restrict admin access to trusted IPs."
+            log_info "  Run: ./scripts/configure-env.sh to update settings"
         else
             log_ok "Admin console accessible from any IP (development domain)"
         fi

@@ -51,7 +51,7 @@ This approach:
 
 ### Required Environment Variables
 
-Ensure these are set in your `.env` file (created by `scripts/init-env.sh`):
+Ensure these are set in your `.env` file (created by `scripts/configure-env.sh`):
 
 ```bash
 DOMAIN_AUTH=auth.example.org               # Your Keycloak domain

@@ -8,7 +8,12 @@
 
 # Backup env files
 .env.backup
+.env.backup.*
 .env.*.backup
+
+# Temporary env files (generated during configuration)
+.env.tmp
+.env.tmp.*
 
 # =============================================================================
 # Generated nginx Configurations

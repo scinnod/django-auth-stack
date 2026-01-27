@@ -49,7 +49,7 @@ echo ""
 # Check if .env exists
 if [ ! -f .env ]; then
     log_error ".env file not found!"
-    log_info "Run ./scripts/init-env.sh first to create .env"
+    log_info "Run ./scripts/configure-env.sh first to create .env"
     exit 1
 fi
 
