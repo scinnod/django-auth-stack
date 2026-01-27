@@ -417,6 +417,38 @@ else
     log_info "    docker network ls | grep <service>_backend"
 fi
 
+# -----------------------------------------------------------------------------
+# Check 7: Keycloak Admin Security (Production Recommendation)
+# -----------------------------------------------------------------------------
+echo ""
+echo "--- Security ---"
+
+# Source .env if not already done
+if [ -f "$PROJECT_DIR/.env" ]; then
+    set -a
+    source "$PROJECT_DIR/.env"
+    set +a
+fi
+
+# Check if admin IP restriction is configured
+if [ -n "${KEYCLOAK_ADMIN_ALLOWED_IPS:-}" ]; then
+    log_ok "Admin console IP restriction configured"
+    log_info "  Allowed: $KEYCLOAK_ADMIN_ALLOWED_IPS"
+else
+    # Check if this looks like a production domain (not .local)
+    if [ -n "${DOMAIN_AUTH:-}" ]; then
+        if [[ "$DOMAIN_AUTH" != *.local && "$DOMAIN_AUTH" != *localhost* ]]; then
+            log_warn "KEYCLOAK_ADMIN_ALLOWED_IPS not set (public domain detected)"
+            log_info "  For production servers, restrict admin access to trusted IPs:"
+            log_info "  KEYCLOAK_ADMIN_ALLOWED_IPS=\"10.0.0.0/8 192.168.0.0/16\""
+        else
+            log_ok "Admin console accessible from any IP (development domain)"
+        fi
+    else
+        log_info "Admin console accessible from any IP (no restriction set)"
+    fi
+fi
+
 # =============================================================================
 # Summary
 # =============================================================================

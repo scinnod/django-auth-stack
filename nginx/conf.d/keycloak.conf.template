@@ -6,7 +6,25 @@
 # =============================================================================
 # This serves the Keycloak admin console and OAuth2/OIDC endpoints
 # Domain: ${DOMAIN_AUTH} (e.g., auth.example.local)
+#
+# Security Features:
+# - Strict rate limiting for admin console only (5 req/s burst 10)
+# - Enhanced security headers for admin paths
+# - Optional IP restriction via KEYCLOAK_ADMIN_ALLOWED_IPS
+#
+# Note: OIDC endpoints (/realms/) are NOT rate-limited here because:
+# - Keycloak has built-in brute-force detection
+# - Downstream services (OAuth2-proxy) handle their own rate limiting
+# - OAuth2 flows can be burst-y (redirects, token exchanges)
 # =============================================================================
+
+# -----------------------------------------------------------------------------
+# Rate Limiting Zone for Admin Console
+# -----------------------------------------------------------------------------
+# Strict rate limiting for admin endpoints to prevent brute-force attacks
+# Zone: 10MB shared memory (~160,000 IP addresses)
+# Rate: 5 requests/second per IP (strict for admin operations)
+limit_req_zone $binary_remote_addr zone=keycloak_admin:10m rate=5r/s;
 
 server {
     listen 80;
@@ -31,7 +49,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/privkey.pem;
 
     # -------------------------------------------------------------------------
-    # Security Headers
+    # Security Headers (applied to all responses)
     # -------------------------------------------------------------------------
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
 
@@ -59,7 +77,111 @@ server {
     }
 
     # -------------------------------------------------------------------------
-    # Keycloak Proxy
+    # Keycloak Admin Console (Hardened)
+    # -------------------------------------------------------------------------
+    # The /admin path serves the Keycloak Admin Console.
+    # This is a high-value target and requires additional protection:
+    # - Strict rate limiting (5 req/s, burst 10)
+    # - Enhanced security headers
+    # - Optional IP restriction via KEYCLOAK_ADMIN_ALLOWED_IPS
+    # -------------------------------------------------------------------------
+    location /admin {
+        # --- IP Restriction (Optional) ---
+        # If KEYCLOAK_ADMIN_ALLOWED_IPS is set, only listed IPs can access admin
+        # Format: space-separated CIDR blocks, e.g., "10.0.0.0/8 192.168.1.0/24"
+        # If empty or unset, admin is accessible from any IP (protected by auth)
+        ${KEYCLOAK_ADMIN_IP_RULES}
+
+        # --- Strict Rate Limiting ---
+        # 5 requests/second baseline, burst allows 10 requests before limiting
+        # nodelay: reject excess requests immediately (don't queue)
+        limit_req zone=keycloak_admin burst=10 nodelay;
+        limit_req_status 429;
+
+        # --- Enhanced Security Headers for Admin ---
+        # Prevent embedding in iframes (clickjacking protection)
+        add_header X-Frame-Options "DENY" always;
+        # Prevent MIME type sniffing
+        add_header X-Content-Type-Options "nosniff" always;
+        # Strict CSP for admin console
+        add_header Content-Security-Policy "frame-ancestors 'none'" always;
+        # Cache control - prevent caching of admin responses
+        add_header Cache-Control "no-store, no-cache, must-revalidate, private" always;
+        add_header Pragma "no-cache" always;
+        # HSTS (inherited but explicitly set)
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+
+        # --- Proxy to Keycloak ---
+        proxy_pass http://keycloak:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+        
+        # Keycloak-specific buffer settings
+        proxy_buffer_size 128k;
+        proxy_buffers 4 256k;
+        proxy_busy_buffers_size 256k;
+    }
+
+    # -------------------------------------------------------------------------
+    # Keycloak OIDC/Auth Endpoints
+    # -------------------------------------------------------------------------
+    # These endpoints handle authentication flows (login, token, logout)
+    # No rate limiting here - Keycloak has built-in brute-force protection
+    # and downstream services handle their own rate limiting.
+    # -------------------------------------------------------------------------
+    location /realms/ {
+        proxy_pass http://keycloak:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+        
+        # Keycloak-specific buffer settings
+        proxy_buffer_size 128k;
+        proxy_buffers 4 256k;
+        proxy_busy_buffers_size 256k;
+    }
+
+    # -------------------------------------------------------------------------
+    # Keycloak Resources (Static Assets - No Rate Limiting)
+    # -------------------------------------------------------------------------
+    location /resources/ {
+        proxy_pass http://keycloak:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+        
+        # Cache static resources
+        proxy_cache_valid 200 1h;
+    }
+
+    # -------------------------------------------------------------------------
+    # Keycloak JS (Static Assets - No Rate Limiting)
+    # -------------------------------------------------------------------------
+    location /js/ {
+        proxy_pass http://keycloak:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+        
+        # Cache static resources
+        proxy_cache_valid 200 1h;
+    }
+
+    # -------------------------------------------------------------------------
+    # Keycloak Default (Fallback)
     # -------------------------------------------------------------------------
     location / {
         proxy_pass http://keycloak:8080;

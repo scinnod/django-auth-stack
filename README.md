@@ -31,11 +31,12 @@ Production-ready authentication gateway combining nginx reverse proxy with Keycl
 4. [Initial Setup](#initial-setup)
 5. [Keycloak Configuration](#keycloak-configuration)
 6. [Domain Selection](#domain-selection)
-7. [TLS Certificate Modes](#tls-certificate-modes)
-8. [Network Architecture](#network-architecture)
-9. [Django Integration](#django-integration)
-10. [Production Readiness](#production-readiness)
-11. [Troubleshooting](#troubleshooting)
+7. [Keycloak Admin Console Security](#keycloak-admin-console-security)
+8. [TLS Certificate Modes](#tls-certificate-modes)
+9. [Network Architecture](#network-architecture)
+10. [Django Integration](#django-integration)
+11. [Production Readiness](#production-readiness)
+12. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -430,6 +431,54 @@ SERVICE_2_DOMAIN=admin.example.com
 
 ---
 
+## Keycloak Admin Console Security
+
+The Keycloak admin console (`/admin`) is a high-value target. This stack implements defense-in-depth:
+
+### Default Protections (Always Active)
+
+1. **Keycloak Authentication** - Admin console requires username/password
+2. **Strict Rate Limiting** - 5 requests/second per IP (burst 10) prevents brute-force
+3. **Enhanced Security Headers:**
+   - `X-Frame-Options: DENY` - Prevents clickjacking
+   - `Content-Security-Policy: frame-ancestors 'none'` - Additional clickjacking protection
+   - `Cache-Control: no-store, no-cache` - Prevents caching of sensitive admin pages
+
+> **Note:** OIDC endpoints (`/realms/`) are intentionally not rate-limited at the nginx level.
+> Keycloak has built-in brute-force detection, and downstream OAuth2 clients should implement
+> their own rate limiting appropriate to their use case.
+
+### Optional: IP-Based Access Restriction
+
+For production environments, you can restrict admin console access to specific IPs or networks:
+
+```bash
+# In .env - restrict to office network and VPN
+KEYCLOAK_ADMIN_ALLOWED_IPS=203.0.113.0/24 10.8.0.0/24
+
+# Restrict to localhost only (access via SSH tunnel)
+KEYCLOAK_ADMIN_ALLOWED_IPS=127.0.0.1 ::1
+
+# Allow specific admin workstations
+KEYCLOAK_ADMIN_ALLOWED_IPS=192.168.1.100 192.168.1.101 10.0.0.50
+```
+
+When configured, requests from non-allowed IPs receive HTTP 403 Forbidden.
+
+**When to use IP restriction:**
+- Production servers accessible from the internet
+- Compliance requirements mandate network-level access control
+- Defense-in-depth for high-security environments
+
+**When NOT to use:**
+- Development environments (leave unset)
+- Dynamic IP environments without VPN
+- When you might lock yourself out
+
+> **TIP:** If using IP restriction, always include a fallback access method (VPN, bastion host, or SSH tunnel with `127.0.0.1`).
+
+---
+
 ## TLS Certificate Modes
 
 ### Required Files
@@ -662,6 +711,10 @@ This stack is **production-ready** with the following configurations:
 - Network segmentation (internal networks for sensitive services)
 - `no-new-privileges` security option on all containers
 - OAuth2-proxy validates authentication before nginx forwards requests
+- **Keycloak Admin Console Hardening:**
+  - Strict rate limiting (5 req/s, burst 10) to prevent brute-force attacks
+  - Enhanced security headers (CSP frame-ancestors 'none', no-cache, X-Frame-Options: DENY)
+  - Optional IP-based access restriction via `KEYCLOAK_ADMIN_ALLOWED_IPS`
 
 ### ✅ nginx Configuration
 - Hardened defaults for production edge proxy
@@ -670,7 +723,8 @@ This stack is **production-ready** with the following configurations:
 - Proper proxy headers (X-Forwarded-*, X-Real-IP)
 - WebSocket support
 - Health check endpoint
-- Rate limiting **disabled** (suitable for reverse proxy setups where multiple users share few IPs)
+- **Rate limiting for Keycloak admin console only** (5 req/s, protects against brute-force)
+- OIDC endpoints are not rate-limited (Keycloak has built-in brute-force protection)
 
 ### ✅ Keycloak
 - PostgreSQL database (recommended for production by Keycloak)

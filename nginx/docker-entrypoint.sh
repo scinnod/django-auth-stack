@@ -36,8 +36,29 @@ echo "[nginx-entrypoint] Starting dynamic configuration..."
 # =============================================================================
 echo "[nginx-entrypoint] Processing Keycloak template..."
 
+# --- Build IP restriction rules for Keycloak admin console ---
+# If KEYCLOAK_ADMIN_ALLOWED_IPS is set, generate allow/deny rules
+# Format: space-separated CIDR blocks, e.g., "10.0.0.0/8 192.168.1.0/24 127.0.0.1"
+KEYCLOAK_ADMIN_IP_RULES=""
+if [ -n "${KEYCLOAK_ADMIN_ALLOWED_IPS:-}" ]; then
+    echo "[nginx-entrypoint] Configuring Keycloak admin IP restriction..."
+    # Build allow rules for each IP/CIDR
+    for ip in $KEYCLOAK_ADMIN_ALLOWED_IPS; do
+        KEYCLOAK_ADMIN_IP_RULES="${KEYCLOAK_ADMIN_IP_RULES}allow ${ip}; "
+        echo "[nginx-entrypoint]   Allowing: $ip"
+    done
+    # Add deny all after allows
+    KEYCLOAK_ADMIN_IP_RULES="${KEYCLOAK_ADMIN_IP_RULES}deny all;"
+    echo "[nginx-entrypoint] Admin access restricted to specified IPs"
+else
+    # No restriction - allow all (comment placeholder for clarity)
+    KEYCLOAK_ADMIN_IP_RULES="# IP restriction disabled - accessible from any IP"
+    echo "[nginx-entrypoint] Keycloak admin accessible from any IP (no restriction)"
+fi
+export KEYCLOAK_ADMIN_IP_RULES
+
 if [ -f "$TEMPLATE_DIR/keycloak.conf.template" ]; then
-    envsubst '${DOMAIN_AUTH} ${KEYCLOAK_REALM} ${OAUTH2_PROXY_COOKIE_DOMAIN} ${OAUTH2_PROXY_CLIENT_ID}' \
+    envsubst '${DOMAIN_AUTH} ${KEYCLOAK_REALM} ${OAUTH2_PROXY_COOKIE_DOMAIN} ${OAUTH2_PROXY_CLIENT_ID} ${KEYCLOAK_ADMIN_IP_RULES}' \
         < "$TEMPLATE_DIR/keycloak.conf.template" \
         > "$CONF_DIR/keycloak.conf"
     echo "[nginx-entrypoint] Created: keycloak.conf"

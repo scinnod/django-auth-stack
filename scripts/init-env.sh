@@ -180,6 +180,39 @@ $SED_INPLACE "s|OAUTH2_PROXY_COOKIE_DOMAIN=.example.local|OAUTH2_PROXY_COOKIE_DO
 log_info "Set OAUTH2_PROXY_COOKIE_DOMAIN to ${cookie_domain}"
 
 # =============================================================================
+# Keycloak Admin Console Security
+# =============================================================================
+
+echo ""
+log_step "=========================================="
+log_step "Keycloak Admin Console Security"
+log_step "=========================================="
+echo ""
+log_info "The admin console is protected by rate limiting and security headers."
+log_info "You can optionally restrict access to specific IP addresses/networks."
+echo ""
+log_warn "For PUBLIC servers, IP restriction is STRONGLY recommended!"
+log_warn "Leave empty for development or if you'll configure this later."
+echo ""
+log_info "Examples:"
+log_info "  - Office network:    203.0.113.0/24"
+log_info "  - VPN:               10.8.0.0/24"
+log_info "  - Localhost (SSH):   127.0.0.1"
+log_info "  - Multiple:          203.0.113.0/24 10.8.0.0/24 127.0.0.1"
+echo ""
+read -p "Allowed IPs/CIDRs for admin console (space-separated, Enter to skip): " admin_allowed_ips
+
+if [ -n "$admin_allowed_ips" ]; then
+    # Escape any forward slashes in CIDR notation for sed
+    admin_allowed_ips_escaped=$(echo "$admin_allowed_ips" | sed 's|/|\\/|g')
+    $SED_INPLACE "s|^# KEYCLOAK_ADMIN_ALLOWED_IPS=.*|KEYCLOAK_ADMIN_ALLOWED_IPS=${admin_allowed_ips_escaped}|g" .env
+    log_info "Set KEYCLOAK_ADMIN_ALLOWED_IPS to: ${admin_allowed_ips}"
+else
+    log_info "Skipping IP restriction (admin accessible from any IP)"
+    log_warn "Remember to configure this before exposing to the internet!"
+fi
+
+# =============================================================================
 # Service Configuration
 # =============================================================================
 
@@ -357,6 +390,7 @@ log_warn "6. Restart the stack:"
 log_warn "     docker compose restart oauth2-proxy"
 echo ""
 log_info "For detailed instructions, see: README.md"
+log_info "Run ./scripts/preflight-check.sh before starting to verify setup."
 echo ""
 
 exit 0

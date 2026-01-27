@@ -24,3 +24,33 @@ Only the latest version receives security updates.
 - Use TLS certificates in production
 - Regularly rotate secrets and credentials
 - Monitor container logs for suspicious activity
+
+## Keycloak Admin Console Protection
+
+The admin console is protected by multiple security layers:
+
+### Default Protections (Always Active)
+
+| Protection | Description |
+|------------|-------------|
+| Authentication | Keycloak admin username/password required |
+| Rate Limiting | 5 req/s per IP (burst 10) on admin console only |
+| Security Headers | X-Frame-Options: DENY, CSP: frame-ancestors 'none' |
+| No-Cache Headers | Prevents caching of admin responses |
+| HTTPS Only | HTTP automatically redirects to HTTPS |
+| HSTS | Strict-Transport-Security with preload |
+
+> **Note:** OIDC endpoints are not rate-limited at nginx level. Keycloak has built-in
+> brute-force detection, and downstream services should implement their own rate limiting.
+
+### Optional IP Restriction
+
+For production environments, restrict admin access to specific networks:
+
+```bash
+# .env - Examples
+KEYCLOAK_ADMIN_ALLOWED_IPS=203.0.113.0/24 10.8.0.0/24  # Office + VPN
+KEYCLOAK_ADMIN_ALLOWED_IPS=127.0.0.1 ::1              # Localhost only (SSH tunnel)
+```
+
+See [README.md](README.md#keycloak-admin-console-security) for detailed configuration.
