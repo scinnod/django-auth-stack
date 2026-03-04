@@ -23,6 +23,12 @@ nginx/conf.d/*.conf
 !nginx/conf.d/*.conf.template
 
 # =============================================================================
+# Generated Docker Compose Files
+# =============================================================================
+# Generated from service configurations
+docker-compose.override.yml
+
+# =============================================================================
 # TLS/SSL Certificates
 # =============================================================================
 # Certificate files (sensitive private keys)

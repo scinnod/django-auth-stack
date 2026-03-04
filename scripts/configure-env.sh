@@ -604,8 +604,20 @@ set_env_value() {
     local key="$1"
     local value="$2"
     
-    # Escape special characters for sed
-    local escaped_value=$(echo "$value" | sed 's/[&/\]/\\&/g')
+    # Quote values that contain spaces so that bash 'source' works correctly.
+    # Without quotes, bash treats 'KEY=a b' as a temp-env-var assignment + command
+    # 'b', which fails silently and leaves KEY unset.
+    # Docker Compose strips surrounding quotes from .env values, so quoting is
+    # safe for both shell sourcing and Docker Compose consumption.
+    local stored_value
+    if [[ "$value" == *' '* ]]; then
+        stored_value="\"${value}\""
+    else
+        stored_value="$value"
+    fi
+    
+    # Escape special characters for sed (only in the stored/quoted form)
+    local escaped_value=$(echo "$stored_value" | sed 's/[&/\]/\\&/g')
     
     # Try to replace existing key
     if grep -q "^${key}=" "$ENV_TEMP" 2>/dev/null; then
@@ -615,7 +627,7 @@ set_env_value() {
         $SED_INPLACE "s|^# ${key}=.*|${key}=${escaped_value}|g" "$ENV_TEMP"
     else
         # Append if not found
-        echo "${key}=${value}" >> "$ENV_TEMP"
+        echo "${key}=${stored_value}" >> "$ENV_TEMP"
     fi
 }
 

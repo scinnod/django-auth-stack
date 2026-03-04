@@ -426,28 +426,38 @@ fi
 echo ""
 echo "--- Security ---"
 
-# Source .env if not already done
+# Read KEYCLOAK_ADMIN_ALLOWED_IPS directly from the .env file via grep.
+# We do NOT use 'source' here because unquoted space-separated values like
+#   KEYCLOAK_ADMIN_ALLOWED_IPS=10.0.0.1 192.168.1.1
+# are mis-parsed by bash: it treats them as a temporary env-var assignment
+# followed by a command ('192.168.1.1'), so the variable is never set.
+# Grep-based parsing is immune to this and handles both quoted and unquoted values.
+KEYCLOAK_ADMIN_ALLOWED_IPS_CHECK=""
 if [ -f "$PROJECT_DIR/.env" ]; then
-    set -a
-    source "$PROJECT_DIR/.env"
-    set +a
+    KEYCLOAK_ADMIN_ALLOWED_IPS_CHECK=$(grep "^KEYCLOAK_ADMIN_ALLOWED_IPS=" "$PROJECT_DIR/.env" \
+        | cut -d= -f2- \
+        | sed "s/^['\"]//;s/['\"]$//" \
+        | xargs)
 fi
 
 # Check if admin IP restriction is configured
 # Note: Empty value is valid (means no restriction)
-if [ -n "${KEYCLOAK_ADMIN_ALLOWED_IPS:-}" ]; then
+if [ -n "${KEYCLOAK_ADMIN_ALLOWED_IPS_CHECK}" ]; then
     log_ok "Admin console IP restriction configured"
-    log_info "  Allowed: $KEYCLOAK_ADMIN_ALLOWED_IPS"
+    log_info "  Allowed: $KEYCLOAK_ADMIN_ALLOWED_IPS_CHECK"
 else
     # KEYCLOAK_ADMIN_ALLOWED_IPS is empty or not set
     # Empty value is valid - means no IP restriction (but still requires auth)
     # Check if this looks like a production domain (not .local)
-    if [ -n "${DOMAIN_AUTH:-}" ]; then
-        if [[ "$DOMAIN_AUTH" != *.local && "$DOMAIN_AUTH" != *localhost* ]]; then
-            log_warn "KEYCLOAK_ADMIN_ALLOWED_IPS is empty or not set (public domain detected)"
+    if [ -f "$PROJECT_DIR/.env" ]; then
+        DOMAIN_AUTH_CHECK=$(grep "^DOMAIN_AUTH=" "$PROJECT_DIR/.env" | cut -d= -f2- | sed "s/^['\"]//;s/['\"]$//" | xargs)
+    fi
+    if [ -n "${DOMAIN_AUTH_CHECK:-}" ]; then
+        if [[ "$DOMAIN_AUTH_CHECK" != *.local && "$DOMAIN_AUTH_CHECK" != *localhost* ]]; then
+            log_warn "KEYCLOAK_ADMIN_ALLOWED_IPS is empty (public domain detected)"
             log_info "  For production servers, it's recommended to restrict admin access to trusted IPs."
-            log_info "  Run: ./scripts/configure-env.sh to configure IP restrictions"
-            log_info "  Or manually set KEYCLOAK_ADMIN_ALLOWED_IPS in .env (space-separated IPs/CIDRs)"
+            log_info "  Set in .env (space-separated IPs/CIDRs): KEYCLOAK_ADMIN_ALLOWED_IPS=10.0.0.1 192.168.1.0/24"
+            log_info "  Or run: ./scripts/configure-env.sh"
         else
             log_ok "Admin console accessible from any IP (development domain, no IP restriction)"
         fi
