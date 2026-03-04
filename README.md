@@ -551,6 +551,11 @@ openssl dhparam -out certs/dhparam.pem 2048
 
 ### Mode C: Let's Encrypt
 
+**Prerequisites:**
+- DNS A/AAAA records for all domains must point to this server
+- Port 80 must be reachable from the internet (firewall open)
+- The stack must NOT already be running (the script handles startup)
+
 1. Update `.env`:
    ```bash
    LETSENCRYPT_EMAIL=your-email@example.com
@@ -560,6 +565,18 @@ openssl dhparam -out certs/dhparam.pem 2048
    ```bash
    ./scripts/init-letsencrypt.sh
    ```
+   
+   The script will:
+   - Stop any running containers (clean slate)
+   - Generate dummy certificates for initial nginx startup
+   - Start nginx with the dummy certs
+   - **Run an ACME self-test** — creates a test file and verifies nginx serves it
+   - Show you a URL to test externally before proceeding
+   - Request real certificates from Let's Encrypt
+
+   > **Stuck at certificate request?** The script includes a self-test that pauses
+   > and asks you to verify a test URL from another machine. If that URL doesn't
+   > return `ok`, the ACME challenge will fail. See [Let's Encrypt Troubleshooting](#lets-encrypt-certificate-issues).
 
 3. Start with Let's Encrypt override:
    ```bash
@@ -812,6 +829,43 @@ Before deploying to production:
 ---
 
 ## Troubleshooting
+
+### Let's Encrypt Certificate Issues
+
+**The init script runs an ACME self-test.** After nginx starts, it creates a test
+file and shows you a URL like:
+```
+curl http://auth.example.org/.well-known/acme-challenge/acme-test-1709570000
+```
+
+**Test this from a different machine** (not the server itself). Expected: `ok`.
+
+| What you see | Problem | Fix |
+|---|---|---|
+| `ok` | Working! Continue. | — |
+| Connection refused | Port 80 blocked | Open port 80 in firewall |
+| Connection timeout | DNS wrong or port blocked | Check `dig +short <domain>` returns your server's IP |
+| 301 redirect | ACME location block missing | Re-pull/update nginx templates, restart |
+| 404 Not Found | Webroot volume not mounted | Check `certbot_webroot` volume in compose |
+| Empty / no response | nginx not running | Check `docker compose ps` and nginx logs |
+
+**If the self-test passes but certbot still hangs:**
+- The internal self-test uses `localhost`. The external test URL uses the real domain.
+- Let's Encrypt must reach your server from the internet on port 80.
+- Corporate firewalls, NAT, or CDNs (e.g., Cloudflare) can block or alter HTTP traffic.
+
+**Manual debugging:**
+```bash
+# Check DNS resolves to your server
+dig +short auth.example.org
+
+# Check nginx logs during certbot attempt
+docker compose -f docker-compose.yml -f docker-compose.letsencrypt.yml logs -f nginx
+
+# Check if nginx config has the ACME location block
+docker compose -f docker-compose.yml -f docker-compose.letsencrypt.yml exec nginx \
+    grep -r "acme-challenge" /etc/nginx/
+```
 
 ### Keycloak not starting
 
