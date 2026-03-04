@@ -120,10 +120,11 @@ for domain in "${DOMAINS[@]}"; do
     log_info "Creating dummy certificate for $domain..."
     
     docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" run --rm --entrypoint "\
+        sh -c 'mkdir -p /etc/letsencrypt/live/$domain && \
         openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
-        -keyout '/etc/letsencrypt/live/$domain/privkey.pem' \
-        -out '/etc/letsencrypt/live/$domain/fullchain.pem' \
-        -subj '/CN=localhost'" certbot
+        -keyout /etc/letsencrypt/live/$domain/privkey.pem \
+        -out /etc/letsencrypt/live/$domain/fullchain.pem \
+        -subj /CN=localhost'" certbot
     
     # Also create symlink at root level for shared cert config
     docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" run --rm --entrypoint "\
