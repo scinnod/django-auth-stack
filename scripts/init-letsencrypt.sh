@@ -82,6 +82,12 @@ log_error() {
 # =============================================================================
 
 log_info "Starting Let's Encrypt initialization..."
+log_info "Domains to certify: ${DOMAINS[*]}"
+log_info "Contact email: $EMAIL"
+if [ "$STAGING" -eq 1 ]; then
+    log_warn "STAGING MODE: Will issue test certificates (not trusted by browsers)"
+fi
+echo ""
 
 # Check if running as root (may be needed for docker)
 if [ "$EUID" -ne 0 ] && ! groups | grep -q docker; then
@@ -110,6 +116,7 @@ fi
 # =============================================================================
 
 log_info "Creating dummy certificates for initial nginx startup..."
+log_info "(nginx needs valid cert files to start, even before real certs are obtained)"
 
 # Create volume if it doesn't exist
 docker volume create django-auth_certbot_certs > /dev/null 2>&1 || true
@@ -154,6 +161,9 @@ fi
 # =============================================================================
 
 log_info "Requesting Let's Encrypt certificates..."
+log_info "Let's Encrypt will validate domain ownership via HTTP-01 challenge."
+log_info "The ACME server must be able to reach this server on port 80."
+echo ""
 
 # Set staging flag if testing
 STAGING_ARG=""
@@ -165,6 +175,9 @@ fi
 # Request certificates for all domains
 for domain in "${DOMAINS[@]}"; do
     log_info "Obtaining certificate for $domain..."
+    log_info "  This requires Let's Encrypt to reach http://$domain/.well-known/acme-challenge/"
+    log_info "  Ensure DNS points to this server and port 80 is open from the internet."
+    log_info "  This may take 30-90 seconds per domain. Please be patient..."
     
     docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" run --rm certbot certonly \
         --webroot \
@@ -172,6 +185,7 @@ for domain in "${DOMAINS[@]}"; do
         --email "$EMAIL" \
         --agree-tos \
         --no-eff-email \
+        --non-interactive \
         $STAGING_ARG \
         -d "$domain"
     
@@ -179,7 +193,11 @@ for domain in "${DOMAINS[@]}"; do
         log_info "Certificate obtained successfully for $domain"
     else
         log_error "Failed to obtain certificate for $domain"
-        log_error "Check DNS configuration and firewall settings"
+        log_error "Common causes:"
+        log_error "  - DNS A/AAAA record for $domain does not point to this server"
+        log_error "  - Port 80 is blocked by firewall (Let's Encrypt HTTP-01 challenge needs it)"
+        log_error "  - nginx is not serving /.well-known/acme-challenge/ (check nginx logs)"
+        log_error "Debug: docker compose -f $COMPOSE_FILE -f $LE_COMPOSE_FILE logs nginx"
         exit 1
     fi
 done

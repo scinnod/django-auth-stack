@@ -30,6 +30,11 @@ server {
     listen 80;
     listen [::]:80;
     server_name ${DOMAIN_AUTH};
+
+    # Let's Encrypt ACME challenge (must be served over HTTP)
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
     
     # Redirect HTTP -> HTTPS
     location / {

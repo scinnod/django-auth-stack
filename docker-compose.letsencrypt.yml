@@ -18,8 +18,6 @@
 #   - Share certificate files with nginx via volume
 # =============================================================================
 
-version: '3.8'
-
 services:
   # ===========================================================================
   # Nginx - Override volumes for Let's Encrypt mode

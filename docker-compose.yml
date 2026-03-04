@@ -29,8 +29,6 @@
 #     docker compose -f docker-compose.yml -f docker-compose.letsencrypt.yml up -d
 # =============================================================================
 
-version: '3.8'
-
 services:
   # ===========================================================================
   # PostgreSQL - Keycloak database
