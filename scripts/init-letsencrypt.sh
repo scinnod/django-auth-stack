@@ -144,17 +144,31 @@ done
 # =============================================================================
 
 log_info "Starting nginx with dummy certificates..."
-docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" up -d nginx
+docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" up -d nginx 2>&1
 
 # Wait for nginx to be ready
-log_info "Waiting for nginx to start..."
-sleep 5
-
-# Check if nginx is running
-if ! docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" ps nginx | grep -q "Up"; then
-    log_error "nginx failed to start. Check logs: docker compose logs nginx"
-    exit 1
-fi
+log_info "Waiting for nginx to start (up to 30s)..."
+for i in $(seq 1 6); do
+    sleep 5
+    # Docker Compose v2 uses "running" (lowercase), v1 uses "Up"
+    if docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" ps nginx 2>/dev/null | grep -qiE "up|running"; then
+        break
+    fi
+    if [ "$i" -eq 6 ]; then
+        log_error "nginx failed to start!"
+        log_error "--- docker compose ps ---"
+        docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" ps -a 2>&1 | sed 's/^/  /'
+        log_error "--- nginx container logs (last 40 lines) ---"
+        docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" logs --tail=40 nginx 2>&1 | sed 's/^/  /'
+        log_error "Common causes:"
+        log_error "  - Missing certificate files in /etc/letsencrypt/ (symlink creation failed?)"
+        log_error "  - Missing dhparam.pem (run: openssl dhparam -out ./certs/dhparam.pem 2048)"
+        log_error "  - nginx config error (run: docker compose -f $COMPOSE_FILE -f $LE_COMPOSE_FILE run --rm nginx nginx -t)"
+        exit 1
+    fi
+    log_info "  Still waiting... (${i}/6)"
+done
+log_info "nginx is running."
 
 # =============================================================================
 # Obtain Real Certificates
