@@ -434,21 +434,25 @@ if [ -f "$PROJECT_DIR/.env" ]; then
 fi
 
 # Check if admin IP restriction is configured
+# Note: Empty value is valid (means no restriction)
 if [ -n "${KEYCLOAK_ADMIN_ALLOWED_IPS:-}" ]; then
     log_ok "Admin console IP restriction configured"
     log_info "  Allowed: $KEYCLOAK_ADMIN_ALLOWED_IPS"
 else
+    # KEYCLOAK_ADMIN_ALLOWED_IPS is empty or not set
+    # Empty value is valid - means no IP restriction (but still requires auth)
     # Check if this looks like a production domain (not .local)
     if [ -n "${DOMAIN_AUTH:-}" ]; then
         if [[ "$DOMAIN_AUTH" != *.local && "$DOMAIN_AUTH" != *localhost* ]]; then
-            log_warn "KEYCLOAK_ADMIN_ALLOWED_IPS not set (public domain detected)"
-            log_info "  For production servers, restrict admin access to trusted IPs."
-            log_info "  Run: ./scripts/configure-env.sh to update settings"
+            log_warn "KEYCLOAK_ADMIN_ALLOWED_IPS is empty or not set (public domain detected)"
+            log_info "  For production servers, it's recommended to restrict admin access to trusted IPs."
+            log_info "  Run: ./scripts/configure-env.sh to configure IP restrictions"
+            log_info "  Or manually set KEYCLOAK_ADMIN_ALLOWED_IPS in .env (space-separated IPs/CIDRs)"
         else
-            log_ok "Admin console accessible from any IP (development domain)"
+            log_ok "Admin console accessible from any IP (development domain, no IP restriction)"
         fi
     else
-        log_info "Admin console accessible from any IP (no restriction set)"
+        log_ok "Admin console accessible from any IP (no IP restriction configured)"
     fi
 fi
 

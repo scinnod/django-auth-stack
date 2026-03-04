@@ -88,7 +88,8 @@ server {
     location /admin {
         # --- IP Restriction (Optional) ---
         # If KEYCLOAK_ADMIN_ALLOWED_IPS is set, only listed IPs can access admin
-        # Format: space-separated CIDR blocks, e.g., "10.0.0.0/8 192.168.1.0/24"
+        # Format: Space-separated CIDR blocks (NOT comma-separated)
+        #   Example: "10.0.0.0/8 192.168.1.0/24 127.0.0.1"
         # If empty or unset, admin is accessible from any IP (protected by auth)
         ${KEYCLOAK_ADMIN_IP_RULES}
 

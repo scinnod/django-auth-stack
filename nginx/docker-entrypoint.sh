@@ -38,7 +38,8 @@ echo "[nginx-entrypoint] Processing Keycloak template..."
 
 # --- Build IP restriction rules for Keycloak admin console ---
 # If KEYCLOAK_ADMIN_ALLOWED_IPS is set, generate allow/deny rules
-# Format: space-separated CIDR blocks, e.g., "10.0.0.0/8 192.168.1.0/24 127.0.0.1"
+# Format: Space-separated CIDR blocks (NOT comma-separated)
+#   Example: "10.0.0.0/8 192.168.1.0/24 127.0.0.1"
 KEYCLOAK_ADMIN_IP_RULES=""
 if [ -n "${KEYCLOAK_ADMIN_ALLOWED_IPS:-}" ]; then
     echo "[nginx-entrypoint] Configuring Keycloak admin IP restriction..."

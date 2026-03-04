@@ -477,7 +477,9 @@ The Keycloak admin console (`/admin`) is a high-value target. This stack impleme
 
 ### Optional: IP-Based Access Restriction
 
-For production environments, you can restrict admin console access to specific IPs or networks:
+For production environments, you can restrict admin console access to specific IPs or networks.
+
+**Format:** Space-separated list of IP addresses/CIDR blocks (NOT comma-separated)
 
 ```bash
 # In .env - restrict to office network and VPN
@@ -488,6 +490,9 @@ KEYCLOAK_ADMIN_ALLOWED_IPS=127.0.0.1 ::1
 
 # Allow specific admin workstations
 KEYCLOAK_ADMIN_ALLOWED_IPS=192.168.1.100 192.168.1.101 10.0.0.50
+
+# No restriction (empty value = accessible from any IP)
+KEYCLOAK_ADMIN_ALLOWED_IPS=
 ```
 
 When configured, requests from non-allowed IPs receive HTTP 403 Forbidden.

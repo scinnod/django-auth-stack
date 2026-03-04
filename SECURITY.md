@@ -45,12 +45,15 @@ The admin console is protected by multiple security layers:
 
 ### Optional IP Restriction
 
-For production environments, restrict admin access to specific networks:
+For production environments, restrict admin access to specific networks.
+
+**Format:** Space-separated list of IP addresses/CIDR blocks (NOT comma-separated)
 
 ```bash
 # .env - Examples
 KEYCLOAK_ADMIN_ALLOWED_IPS=203.0.113.0/24 10.8.0.0/24  # Office + VPN
 KEYCLOAK_ADMIN_ALLOWED_IPS=127.0.0.1 ::1              # Localhost only (SSH tunnel)
+KEYCLOAK_ADMIN_ALLOWED_IPS=                           # No restriction (empty = any IP)
 ```
 
 See [README.md](README.md#keycloak-admin-console-security) for detailed configuration.

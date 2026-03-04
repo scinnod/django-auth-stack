@@ -355,9 +355,11 @@ default_admin_ips=$(get_existing_value "KEYCLOAK_ADMIN_ALLOWED_IPS" "")
 log_info "Optionally restrict admin console access to specific IPs/networks."
 log_warn "For PUBLIC servers, IP restriction is STRONGLY recommended!"
 echo ""
+log_info "Format: Space-separated IPs/CIDRs (NOT comma-separated)"
 log_info "Examples: 203.0.113.0/24 10.8.0.0/24 127.0.0.1"
+log_info "Leave empty for no restriction (any IP, still requires authentication)"
 echo ""
-KEYCLOAK_ADMIN_ALLOWED_IPS=$(prompt_with_default "Allowed IPs for admin (space-separated, Enter to skip)" "$default_admin_ips")
+KEYCLOAK_ADMIN_ALLOWED_IPS=$(prompt_with_default "Allowed IPs for admin (space-separated, Enter for no restriction)" "$default_admin_ips")
 
 # =============================================================================
 # OAuth2 Proxy Client Secret
@@ -629,10 +631,8 @@ set_env_value "KEYCLOAK_ADMIN_PASSWORD" "$KEYCLOAK_ADMIN_PASSWORD"
 set_env_value "KEYCLOAK_REALM" "$KEYCLOAK_REALM"
 set_env_value "KEYCLOAK_LOG_LEVEL" "$KEYCLOAK_LOG_LEVEL"
 
-# Admin security
-if [ -n "$KEYCLOAK_ADMIN_ALLOWED_IPS" ]; then
-    set_env_value "KEYCLOAK_ADMIN_ALLOWED_IPS" "$KEYCLOAK_ADMIN_ALLOWED_IPS"
-fi
+# Admin security (always write, even if empty - empty means no restriction)
+set_env_value "KEYCLOAK_ADMIN_ALLOWED_IPS" "$KEYCLOAK_ADMIN_ALLOWED_IPS"
 
 # OAuth2 Proxy
 set_env_value "OAUTH2_PROXY_CLIENT_ID" "$OAUTH2_PROXY_CLIENT_ID"
