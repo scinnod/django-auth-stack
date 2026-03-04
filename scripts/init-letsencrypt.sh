@@ -112,6 +112,17 @@ if [ ! -f .env ]; then
 fi
 
 # =============================================================================
+# Clean Slate: Stop existing containers
+# =============================================================================
+# The nginx entrypoint regenerates config files from templates at startup.
+# If old containers are running, they keep stale configs and won't pick up
+# changes. A fresh start ensures the entrypoint runs with current templates.
+
+log_info "Stopping any existing containers (clean slate)..."
+docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" down 2>&1 || true
+echo ""
+
+# =============================================================================
 # Create Dummy Certificates (for initial nginx startup)
 # =============================================================================
 
@@ -193,20 +204,37 @@ for domain in "${DOMAINS[@]}"; do
     log_info "  Ensure DNS points to this server and port 80 is open from the internet."
     log_info "  This may take 30-90 seconds per domain. Please be patient..."
     
-    docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" run --rm certbot certonly \
+    # Run certbot with verbose output so the user can see ACME progress.
+    # Timeout after 120s: if the challenge hasn't completed by then, something
+    # is wrong (DNS, firewall, nginx config) and hanging longer won't help.
+    CERTBOT_EXIT=0
+    timeout 120 docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" run --rm certbot certonly \
         --webroot \
         --webroot-path=/var/www/certbot \
         --email "$EMAIL" \
         --agree-tos \
         --no-eff-email \
         --non-interactive \
+        --verbose \
         $STAGING_ARG \
-        -d "$domain"
+        -d "$domain" || CERTBOT_EXIT=$?
     
-    if [ $? -eq 0 ]; then
+    if [ "$CERTBOT_EXIT" -eq 0 ]; then
         log_info "Certificate obtained successfully for $domain"
+    elif [ "$CERTBOT_EXIT" -eq 124 ]; then
+        log_error "Timed out after 120s waiting for certificate for $domain"
+        log_error "The ACME HTTP-01 challenge did not complete. This usually means"
+        log_error "Let's Encrypt cannot reach http://$domain/.well-known/acme-challenge/"
+        log_error ""
+        log_error "Troubleshooting:"
+        log_error "  1. Check DNS:  dig +short $domain  (must return this server's public IP)"
+        log_error "  2. Check port: curl -sI http://$domain/.well-known/acme-challenge/test"
+        log_error "     (should return 404, NOT a 301 redirect)"
+        log_error "  3. Check firewall: port 80 must be open from the internet"
+        log_error "  4. Check nginx logs: docker compose -f $COMPOSE_FILE -f $LE_COMPOSE_FILE logs nginx"
+        exit 1
     else
-        log_error "Failed to obtain certificate for $domain"
+        log_error "Failed to obtain certificate for $domain (exit code: $CERTBOT_EXIT)"
         log_error "Common causes:"
         log_error "  - DNS A/AAAA record for $domain does not point to this server"
         log_error "  - Port 80 is blocked by firewall (Let's Encrypt HTTP-01 challenge needs it)"

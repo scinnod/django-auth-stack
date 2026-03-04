@@ -114,8 +114,6 @@ cat > "$OUTPUT_FILE" << 'EOF'
 # DO NOT EDIT MANUALLY - regenerate with the script after changing .env
 # =============================================================================
 
-version: '3.8'
-
 services:
   nginx:
     networks:
