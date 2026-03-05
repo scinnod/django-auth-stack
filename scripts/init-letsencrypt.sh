@@ -193,13 +193,19 @@ log_info "Verifying ACME challenge path is working..."
 # Create a test token in the certbot webroot via the certbot container
 # (nginx has this volume mounted read-only, certbot has it read-write)
 ACME_TEST_TOKEN="acme-test-$(date +%s)"
+FIRST_DOMAIN="${DOMAINS[0]}"
 docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" run --rm --entrypoint "\
     sh -c 'mkdir -p /var/www/certbot/.well-known/acme-challenge && \
     echo ok > /var/www/certbot/.well-known/acme-challenge/$ACME_TEST_TOKEN'" certbot
 
 # Test from inside the nginx container (verifies nginx config is correct)
+# IMPORTANT: We must use the real domain as Host header, NOT "localhost".
+# nginx has a dedicated "server_name localhost" block for health checks that
+# does NOT have the ACME location. The ACME location is in the domain-specific
+# server blocks and the default server (server_name _).
 ACME_SELF_TEST=$(docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" exec -T nginx \
-    wget -q -O - "http://localhost/.well-known/acme-challenge/$ACME_TEST_TOKEN" 2>/dev/null || true)
+    wget -q -O - --header "Host: $FIRST_DOMAIN" \
+    "http://127.0.0.1/.well-known/acme-challenge/$ACME_TEST_TOKEN" 2>/dev/null || true)
 
 if [ "$ACME_SELF_TEST" = "ok" ]; then
     log_info "Internal ACME self-test passed (nginx serves challenge files correctly)"
@@ -207,18 +213,27 @@ else
     log_error "Internal ACME self-test FAILED!"
     log_error "nginx is not serving files from /.well-known/acme-challenge/"
     log_error ""
-    log_error "This means Let's Encrypt validation will fail. Check:"
-    log_error "  1. nginx config has 'location /.well-known/acme-challenge/' block"
-    log_error "  2. The certbot_webroot volume is mounted at /var/www/certbot"
-    log_error "  3. nginx logs: docker compose -f $COMPOSE_FILE -f $LE_COMPOSE_FILE logs nginx"
+    log_error "Debug: checking from inside the nginx container..."
+    # Show what nginx actually returns (helpful for diagnosing redirects vs 404)
+    log_error "--- wget response ---"
+    docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" exec -T nginx \
+        wget -S -O - --header "Host: $FIRST_DOMAIN" \
+        "http://127.0.0.1/.well-known/acme-challenge/$ACME_TEST_TOKEN" 2>&1 | sed 's/^/  /' || true
+    log_error "--- file listing ---"
+    docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" exec -T nginx \
+        ls -la /var/www/certbot/.well-known/acme-challenge/ 2>&1 | sed 's/^/  /' || true
+    log_error "--- nginx config check ---"
+    docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" exec -T nginx \
+        grep -n "acme-challenge" /etc/nginx/conf.d/*.conf /etc/nginx/nginx.conf 2>&1 | sed 's/^/  /' || true
     log_error ""
-    log_error "Debug: manually check from inside the container:"
-    log_error "  docker compose -f $COMPOSE_FILE -f $LE_COMPOSE_FILE exec nginx ls -la /var/www/certbot/.well-known/acme-challenge/"
+    log_error "This means Let's Encrypt validation will fail. Check:"
+    log_error "  1. nginx config has 'location /.well-known/acme-challenge/' block in domain server"
+    log_error "  2. The certbot_webroot volume is mounted at /var/www/certbot in nginx"
+    log_error "  3. nginx logs: docker compose -f $COMPOSE_FILE -f $LE_COMPOSE_FILE logs --tail=20 nginx"
     exit 1
 fi
 
 # Now test from the first domain (externally reachable?)
-FIRST_DOMAIN="${DOMAINS[0]}"
 echo ""
 log_info "============================================================"
 log_info "EXTERNAL VERIFICATION REQUIRED"
