@@ -362,16 +362,22 @@ for domain in "${DOMAINS[@]}"; do
     # step: authorization creation, challenge file placement, validation poll.
     #
     # Key flags:
-    #   -v -v            = debug-level logging (shows HTTP requests to ACME)
-    #   --preferred-challenges http  = explicitly use HTTP-01
-    #   --no-eff-email   = don't share email with EFF
-    #   --non-interactive = no prompts
+    #   PYTHONUNBUFFERED=1  = force Python to flush output immediately
+    #   -T                  = no pseudo-TTY (required for scripts)
+    #   -v -v               = debug-level logging (shows HTTP requests to ACME)
+    #   --preferred-challenges http = explicitly use HTTP-01
     #
     # Timeout: 180s should be enough for one domain. If it takes longer,
     # something is wrong (DNS, firewall, nginx config).
+    #
+    # We temporarily disable set -e because we need to capture the exit code.
+    # Without this, a non-zero certbot exit would terminate the script before
+    # we can show a helpful error message.
     
-    CERTBOT_EXIT=0
-    timeout 180 docker compose $COMPOSE_FLAGS run --rm -T certbot certonly \
+    set +e
+    timeout 180 docker compose $COMPOSE_FLAGS run --rm -T \
+        -e PYTHONUNBUFFERED=1 \
+        certbot certonly \
         --webroot \
         --webroot-path=/var/www/certbot \
         --email "$EMAIL" \
@@ -381,11 +387,9 @@ for domain in "${DOMAINS[@]}"; do
         --preferred-challenges http \
         -v -v \
         $STAGING_ARG \
-        -d "$domain" 2>&1 | while IFS= read -r line; do
-            echo "  [certbot] $line"
-        done
-    # Capture the exit code of the timeout/docker command, not the pipe
-    CERTBOT_EXIT=${PIPESTATUS[0]}
+        -d "$domain"
+    CERTBOT_EXIT=$?
+    set -e
     echo ""
     
     if [ "$CERTBOT_EXIT" -eq 0 ]; then
