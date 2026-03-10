@@ -351,41 +351,47 @@ fi
 
 # Request certificates for all domains
 for domain in "${DOMAINS[@]}"; do
+    log_info "============================================================"
     log_info "Obtaining certificate for $domain..."
-    log_info "  This requires Let's Encrypt to reach http://$domain/.well-known/acme-challenge/"
-    log_info "  Ensure DNS points to this server and port 80 is open from the internet."
-    log_info "  This may take 30-90 seconds per domain..."
+    log_info "============================================================"
+    log_info "  ACME URL: http://$domain/.well-known/acme-challenge/"
+    log_info "  Timeout: 180s per domain"
     echo ""
     
-    # Run certbot with debug-level output (-v -v = debug) so the user sees each
-    # ACME protocol step: authz creation, challenge placement, validation poll.
-    # Timeout after 120s: if the challenge hasn't completed by then, something
-    # is wrong (DNS, firewall, nginx config) and hanging longer won't help.
+    # Run certbot with debug-level output so the user sees each ACME protocol
+    # step: authorization creation, challenge file placement, validation poll.
     #
-    # Show a progress ticker in the background so the user knows we're alive.
-    ( while true; do sleep 5; printf '.' >&2; done ) &
-    TICKER_PID=$!
+    # Key flags:
+    #   -v -v            = debug-level logging (shows HTTP requests to ACME)
+    #   --preferred-challenges http  = explicitly use HTTP-01
+    #   --no-eff-email   = don't share email with EFF
+    #   --non-interactive = no prompts
+    #
+    # Timeout: 180s should be enough for one domain. If it takes longer,
+    # something is wrong (DNS, firewall, nginx config).
     
     CERTBOT_EXIT=0
-    timeout 120 docker compose $COMPOSE_FLAGS run --rm certbot certonly \
+    timeout 180 docker compose $COMPOSE_FLAGS run --rm -T certbot certonly \
         --webroot \
         --webroot-path=/var/www/certbot \
         --email "$EMAIL" \
         --agree-tos \
         --no-eff-email \
         --non-interactive \
+        --preferred-challenges http \
         -v -v \
         $STAGING_ARG \
-        -d "$domain" 2>&1 || CERTBOT_EXIT=$?
-    
-    # Stop the progress ticker
-    kill $TICKER_PID 2>/dev/null; wait $TICKER_PID 2>/dev/null
+        -d "$domain" 2>&1 | while IFS= read -r line; do
+            echo "  [certbot] $line"
+        done
+    # Capture the exit code of the timeout/docker command, not the pipe
+    CERTBOT_EXIT=${PIPESTATUS[0]}
     echo ""
     
     if [ "$CERTBOT_EXIT" -eq 0 ]; then
         log_info "Certificate obtained successfully for $domain"
     elif [ "$CERTBOT_EXIT" -eq 124 ]; then
-        log_error "Timed out after 120s waiting for certificate for $domain"
+        log_error "Timed out after 180s waiting for certificate for $domain"
         log_error "The ACME HTTP-01 challenge did not complete. This usually means"
         log_error "Let's Encrypt cannot reach http://$domain/.well-known/acme-challenge/"
         log_error ""
