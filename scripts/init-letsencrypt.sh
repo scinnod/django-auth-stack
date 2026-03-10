@@ -342,6 +342,38 @@ log_info "Let's Encrypt will validate domain ownership via HTTP-01 challenge."
 log_info "The ACME server must be able to reach this server on port 80."
 echo ""
 
+# -------------------------------------------------------------------------
+# Pre-flight: verify certbot container can reach the ACME server
+# -------------------------------------------------------------------------
+# Certbot must resolve DNS and reach https://acme-v02.api.letsencrypt.org.
+# If the Docker network blocks egress or a corporate firewall is in the way,
+# certbot will hang silently on its first HTTPS request.  Catch that early.
+
+log_info "Pre-check: testing outbound HTTPS from certbot container..."
+set +e
+ACME_CONN=$(timeout 20 docker compose $COMPOSE_FLAGS run --rm -T \
+    --entrypoint "sh" certbot -c \
+    'wget -q -O /dev/null --timeout=10 https://acme-v02.api.letsencrypt.org/directory 2>&1; echo "EXIT:$?"' 2>&1)
+set -e
+
+if echo "$ACME_CONN" | grep -q "EXIT:0"; then
+    log_info "  ACME server is reachable from certbot container"
+else
+    log_error "Cannot reach Let's Encrypt ACME server from certbot container!"
+    log_error "  Output: $ACME_CONN"
+    log_error ""
+    log_error "Possible causes:"
+    log_error "  - Docker daemon iptables/nftables rules blocking egress"
+    log_error "  - Corporate firewall blocking outbound HTTPS (port 443)"
+    log_error "  - DNS resolution failure inside the container"
+    log_error ""
+    log_error "Debug manually:"
+    log_error "  docker compose $COMPOSE_FLAGS run --rm -T --entrypoint sh certbot -c \\"
+    log_error "    'nslookup acme-v02.api.letsencrypt.org && wget -v -O /dev/null https://acme-v02.api.letsencrypt.org/directory'"
+    exit 1
+fi
+echo ""
+
 # Set staging flag if testing
 STAGING_ARG=""
 if [ "$STAGING" -eq 1 ]; then
@@ -361,22 +393,25 @@ for domain in "${DOMAINS[@]}"; do
     # Run certbot with debug-level output so the user sees each ACME protocol
     # step: authorization creation, challenge file placement, validation poll.
     #
+    # IMPORTANT: --entrypoint "certbot" overrides the service's renewal-loop
+    # entrypoint (sh -c 'while :; do certbot renew --quiet; sleep 12h; done').
+    # Without this override, 'certonly' args are ignored and the container
+    # silently runs the renewal loop → hangs on 'sleep 12h' with no output.
+    #
     # Key flags:
-    #   PYTHONUNBUFFERED=1  = force Python to flush output immediately
-    #   -T                  = no pseudo-TTY (required for scripts)
-    #   -v -v               = debug-level logging (shows HTTP requests to ACME)
+    #   --entrypoint certbot = override the renewal-loop entrypoint
+    #   PYTHONUNBUFFERED=1   = force Python to flush output immediately
+    #   -T                   = no pseudo-TTY (required for scripts)
+    #   -v -v                = debug-level logging (shows HTTP requests to ACME)
     #   --preferred-challenges http = explicitly use HTTP-01
     #
     # Timeout: 180s should be enough for one domain. If it takes longer,
     # something is wrong (DNS, firewall, nginx config).
-    #
-    # We temporarily disable set -e because we need to capture the exit code.
-    # Without this, a non-zero certbot exit would terminate the script before
-    # we can show a helpful error message.
     
     set +e
     timeout 180 docker compose $COMPOSE_FLAGS run --rm -T \
         -e PYTHONUNBUFFERED=1 \
+        --entrypoint "certbot" \
         certbot certonly \
         --webroot \
         --webroot-path=/var/www/certbot \
@@ -399,6 +434,10 @@ for domain in "${DOMAINS[@]}"; do
         log_error "The ACME HTTP-01 challenge did not complete. This usually means"
         log_error "Let's Encrypt cannot reach http://$domain/.well-known/acme-challenge/"
         log_error ""
+        log_error "--- Certbot debug log (last 40 lines) ---"
+        docker compose $COMPOSE_FLAGS run --rm -T --entrypoint "sh" certbot -c \
+            'cat /var/log/letsencrypt/letsencrypt.log 2>/dev/null | tail -40' 2>&1 | sed 's/^/  /' || true
+        log_error ""
         log_error "Troubleshooting:"
         log_error "  1. Check DNS:  dig +short $domain  (must return this server's public IP)"
         log_error "  2. Check port: curl -sI http://$domain/.well-known/acme-challenge/test"
@@ -408,6 +447,11 @@ for domain in "${DOMAINS[@]}"; do
         exit 1
     else
         log_error "Failed to obtain certificate for $domain (exit code: $CERTBOT_EXIT)"
+        log_error ""
+        log_error "--- Certbot debug log (last 40 lines) ---"
+        docker compose $COMPOSE_FLAGS run --rm -T --entrypoint "sh" certbot -c \
+            'cat /var/log/letsencrypt/letsencrypt.log 2>/dev/null | tail -40' 2>&1 | sed 's/^/  /' || true
+        log_error ""
         log_error "Common causes:"
         log_error "  - DNS A/AAAA record for $domain does not point to this server"
         log_error "  - Port 80 is blocked by firewall (Let's Encrypt HTTP-01 challenge needs it)"
