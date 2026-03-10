@@ -129,9 +129,9 @@ echo ""
 log_info "Creating dummy certificates for initial nginx startup..."
 log_info "(nginx needs valid cert files to start, even before real certs are obtained)"
 
-# Create volume if it doesn't exist
-docker volume create django-auth_certbot_certs > /dev/null 2>&1 || true
-docker volume create django-auth_certbot_webroot > /dev/null 2>&1 || true
+# Note: Docker Compose automatically creates the certbot_certs and
+# certbot_webroot named volumes (defined in docker-compose.letsencrypt.yml)
+# when we first run the certbot service below. No manual volume creation needed.
 
 # Generate dummy certificates for each domain
 for domain in "${DOMAINS[@]}"; do
@@ -198,38 +198,59 @@ docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" run --rm --entrypoint "\
     sh -c 'mkdir -p /var/www/certbot/.well-known/acme-challenge && \
     echo ok > /var/www/certbot/.well-known/acme-challenge/$ACME_TEST_TOKEN'" certbot
 
-# Test from inside the nginx container (verifies nginx config is correct)
-# IMPORTANT: We must use the real domain as Host header, NOT "localhost".
-# nginx has a dedicated "server_name localhost" block for health checks that
-# does NOT have the ACME location. The ACME location is in the domain-specific
-# server blocks and the default server (server_name _).
+# Two-phase self-test from inside the nginx container:
+#
+# Phase 1: Verify the test file exists on disk (volume mount works)
+# Phase 2: Verify nginx serves it over HTTP (config is correct)
+#
+# For the HTTP test we hit 127.0.0.1 without a Host header, which matches
+# the default_server block in nginx.conf. That block has the ACME location.
+# This verifies the default server path. The domain-specific servers use the
+# same templates and same volume, so if the default works, they will too.
+#
+# Note: Alpine's busybox wget does NOT support --header, so we cannot set
+# a custom Host header. Using the default_server is the reliable alternative.
+
+log_info "  Phase 1: Checking file exists in nginx container..."
+ACME_FILE_CHECK=$(docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" exec -T nginx \
+    cat "/var/www/certbot/.well-known/acme-challenge/$ACME_TEST_TOKEN" 2>/dev/null || true)
+
+if [ "$ACME_FILE_CHECK" != "ok" ]; then
+    log_error "ACME self-test Phase 1 FAILED: test file not found in nginx container!"
+    log_error "The certbot_webroot volume is not shared correctly between containers."
+    log_error ""
+    log_error "Debug:"
+    docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" exec -T nginx \
+        ls -la /var/www/certbot/.well-known/acme-challenge/ 2>&1 | sed 's/^/  [ls] /' || \
+        log_error "  /var/www/certbot/.well-known/acme-challenge/ does not exist"
+    docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" exec -T nginx \
+        mount 2>&1 | grep certbot | sed 's/^/  [mount] /' || \
+        log_error "  No certbot volume mounted"
+    exit 1
+fi
+log_info "  Phase 1 passed: test file exists on disk in nginx container"
+
+log_info "  Phase 2: Checking nginx serves it over HTTP..."
 ACME_SELF_TEST=$(docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" exec -T nginx \
-    wget -q -O - --header "Host: $FIRST_DOMAIN" \
-    "http://127.0.0.1/.well-known/acme-challenge/$ACME_TEST_TOKEN" 2>/dev/null || true)
+    wget -q -O - "http://127.0.0.1/.well-known/acme-challenge/$ACME_TEST_TOKEN" 2>/dev/null || true)
 
 if [ "$ACME_SELF_TEST" = "ok" ]; then
-    log_info "Internal ACME self-test passed (nginx serves challenge files correctly)"
+    log_info "  Phase 2 passed: nginx serves ACME challenge files correctly"
+    log_info "Internal ACME self-test passed!"
 else
-    log_error "Internal ACME self-test FAILED!"
-    log_error "nginx is not serving files from /.well-known/acme-challenge/"
+    log_error "ACME self-test Phase 2 FAILED: file exists on disk but nginx won't serve it!"
+    log_error "The location /.well-known/acme-challenge/ block is missing or misconfigured."
     log_error ""
-    log_error "Debug: checking from inside the nginx container..."
-    # Show what nginx actually returns (helpful for diagnosing redirects vs 404)
-    log_error "--- wget response ---"
+    log_error "Debug: wget verbose output from inside nginx container:"
     docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" exec -T nginx \
-        wget -S -O - --header "Host: $FIRST_DOMAIN" \
-        "http://127.0.0.1/.well-known/acme-challenge/$ACME_TEST_TOKEN" 2>&1 | sed 's/^/  /' || true
-    log_error "--- file listing ---"
-    docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" exec -T nginx \
-        ls -la /var/www/certbot/.well-known/acme-challenge/ 2>&1 | sed 's/^/  /' || true
-    log_error "--- nginx config check ---"
-    docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" exec -T nginx \
-        grep -n "acme-challenge" /etc/nginx/conf.d/*.conf /etc/nginx/nginx.conf 2>&1 | sed 's/^/  /' || true
+        wget -S -O - "http://127.0.0.1/.well-known/acme-challenge/$ACME_TEST_TOKEN" 2>&1 | sed 's/^/  /' || true
     log_error ""
-    log_error "This means Let's Encrypt validation will fail. Check:"
-    log_error "  1. nginx config has 'location /.well-known/acme-challenge/' block in domain server"
-    log_error "  2. The certbot_webroot volume is mounted at /var/www/certbot in nginx"
-    log_error "  3. nginx logs: docker compose -f $COMPOSE_FILE -f $LE_COMPOSE_FILE logs --tail=20 nginx"
+    log_error "--- nginx config check (looking for acme-challenge blocks) ---"
+    docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" exec -T nginx \
+        grep -rn "acme-challenge" /etc/nginx/conf.d/*.conf /etc/nginx/nginx.conf 2>&1 | sed 's/^/  /' || true
+    log_error ""
+    log_error "The default_server block in nginx.conf must have:"
+    log_error "  location /.well-known/acme-challenge/ { root /var/www/certbot; }"
     exit 1
 fi
 
