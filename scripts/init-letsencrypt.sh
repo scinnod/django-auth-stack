@@ -53,7 +53,19 @@ STAGING=0  # Set to 1 for testing (avoids rate limits)
 
 COMPOSE_FILE="docker-compose.yml"
 LE_COMPOSE_FILE="docker-compose.letsencrypt.yml"
+OVERRIDE_FILE="docker-compose.override.yml"
 CERTBOT_IMAGE="certbot/certbot:latest"
+
+# Build the compose file flags.
+# IMPORTANT: When using explicit -f flags, Docker Compose does NOT auto-load
+# docker-compose.override.yml. We must include it manually, otherwise nginx
+# won't join the service networks (itsm_backend, etc.) and will crash with
+# "host not found in upstream".
+COMPOSE_FLAGS="-f $COMPOSE_FILE"
+if [ -f "$OVERRIDE_FILE" ]; then
+    COMPOSE_FLAGS="$COMPOSE_FLAGS -f $OVERRIDE_FILE"
+fi
+COMPOSE_FLAGS="$COMPOSE_FLAGS -f $LE_COMPOSE_FILE"
 
 # Colors for output
 RED='\033[0;31m'
@@ -119,7 +131,7 @@ fi
 # changes. A fresh start ensures the entrypoint runs with current templates.
 
 log_info "Stopping any existing containers (clean slate)..."
-docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" down 2>&1 || true
+docker compose $COMPOSE_FLAGS down 2>&1 || true
 echo ""
 
 # =============================================================================
@@ -137,7 +149,7 @@ log_info "(nginx needs valid cert files to start, even before real certs are obt
 for domain in "${DOMAINS[@]}"; do
     log_info "Creating dummy certificate for $domain..."
     
-    docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" run --rm --entrypoint "\
+    docker compose $COMPOSE_FLAGS run --rm --entrypoint "\
         sh -c 'mkdir -p /etc/letsencrypt/live/$domain && \
         openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
         -keyout /etc/letsencrypt/live/$domain/privkey.pem \
@@ -145,7 +157,7 @@ for domain in "${DOMAINS[@]}"; do
         -subj /CN=localhost'" certbot
     
     # Also create symlink at root level for shared cert config
-    docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" run --rm --entrypoint "\
+    docker compose $COMPOSE_FLAGS run --rm --entrypoint "\
         sh -c 'ln -sf /etc/letsencrypt/live/$domain/fullchain.pem /etc/letsencrypt/fullchain.pem && \
         ln -sf /etc/letsencrypt/live/$domain/privkey.pem /etc/letsencrypt/privkey.pem'" certbot || true
 done
@@ -155,26 +167,26 @@ done
 # =============================================================================
 
 log_info "Starting nginx with dummy certificates..."
-docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" up -d nginx 2>&1
+docker compose $COMPOSE_FLAGS up -d nginx 2>&1
 
 # Wait for nginx to be ready
 log_info "Waiting for nginx to start (up to 30s)..."
 for i in $(seq 1 6); do
     sleep 5
     # Docker Compose v2 uses "running" (lowercase), v1 uses "Up"
-    if docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" ps nginx 2>/dev/null | grep -qiE "up|running"; then
+    if docker compose $COMPOSE_FLAGS ps nginx 2>/dev/null | grep -qiE "up|running"; then
         break
     fi
     if [ "$i" -eq 6 ]; then
         log_error "nginx failed to start!"
         log_error "--- docker compose ps ---"
-        docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" ps -a 2>&1 | sed 's/^/  /'
+        docker compose $COMPOSE_FLAGS ps -a 2>&1 | sed 's/^/  /'
         log_error "--- nginx container logs (last 40 lines) ---"
-        docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" logs --tail=40 nginx 2>&1 | sed 's/^/  /'
+        docker compose $COMPOSE_FLAGS logs --tail=40 nginx 2>&1 | sed 's/^/  /'
         log_error "Common causes:"
         log_error "  - Missing certificate files in /etc/letsencrypt/ (symlink creation failed?)"
         log_error "  - Missing dhparam.pem (run: openssl dhparam -out ./certs/dhparam.pem 2048)"
-        log_error "  - nginx config error (run: docker compose -f $COMPOSE_FILE -f $LE_COMPOSE_FILE run --rm nginx nginx -t)"
+        log_error "  - nginx config error (run: docker compose $COMPOSE_FLAGS run --rm nginx nginx -t)"
         exit 1
     fi
     log_info "  Still waiting... (${i}/6)"
@@ -194,7 +206,7 @@ log_info "Verifying ACME challenge path is working..."
 # (nginx has this volume mounted read-only, certbot has it read-write)
 ACME_TEST_TOKEN="acme-test-$(date +%s)"
 FIRST_DOMAIN="${DOMAINS[0]}"
-docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" run --rm --entrypoint "\
+docker compose $COMPOSE_FLAGS run --rm --entrypoint "\
     sh -c 'mkdir -p /var/www/certbot/.well-known/acme-challenge && \
     echo ok > /var/www/certbot/.well-known/acme-challenge/$ACME_TEST_TOKEN'" certbot
 
@@ -212,7 +224,7 @@ docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" run --rm --entrypoint "\
 # a custom Host header. Using the default_server is the reliable alternative.
 
 log_info "  Phase 1: Checking file exists in nginx container..."
-ACME_FILE_CHECK=$(docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" exec -T nginx \
+ACME_FILE_CHECK=$(docker compose $COMPOSE_FLAGS exec -T nginx \
     cat "/var/www/certbot/.well-known/acme-challenge/$ACME_TEST_TOKEN" 2>/dev/null || true)
 
 if [ "$ACME_FILE_CHECK" != "ok" ]; then
@@ -220,10 +232,10 @@ if [ "$ACME_FILE_CHECK" != "ok" ]; then
     log_error "The certbot_webroot volume is not shared correctly between containers."
     log_error ""
     log_error "Debug:"
-    docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" exec -T nginx \
+    docker compose $COMPOSE_FLAGS exec -T nginx \
         ls -la /var/www/certbot/.well-known/acme-challenge/ 2>&1 | sed 's/^/  [ls] /' || \
         log_error "  /var/www/certbot/.well-known/acme-challenge/ does not exist"
-    docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" exec -T nginx \
+    docker compose $COMPOSE_FLAGS exec -T nginx \
         mount 2>&1 | grep certbot | sed 's/^/  [mount] /' || \
         log_error "  No certbot volume mounted"
     exit 1
@@ -231,7 +243,7 @@ fi
 log_info "  Phase 1 passed: test file exists on disk in nginx container"
 
 log_info "  Phase 2: Checking nginx serves it over HTTP..."
-ACME_SELF_TEST=$(docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" exec -T nginx \
+ACME_SELF_TEST=$(docker compose $COMPOSE_FLAGS exec -T nginx \
     wget -q -O - "http://127.0.0.1/.well-known/acme-challenge/$ACME_TEST_TOKEN" 2>/dev/null || true)
 
 if [ "$ACME_SELF_TEST" = "ok" ]; then
@@ -242,11 +254,11 @@ else
     log_error "The location /.well-known/acme-challenge/ block is missing or misconfigured."
     log_error ""
     log_error "Debug: wget verbose output from inside nginx container:"
-    docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" exec -T nginx \
+    docker compose $COMPOSE_FLAGS exec -T nginx \
         wget -S -O - "http://127.0.0.1/.well-known/acme-challenge/$ACME_TEST_TOKEN" 2>&1 | sed 's/^/  /' || true
     log_error ""
     log_error "--- nginx config check (looking for acme-challenge blocks) ---"
-    docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" exec -T nginx \
+    docker compose $COMPOSE_FLAGS exec -T nginx \
         grep -rn "acme-challenge" /etc/nginx/conf.d/*.conf /etc/nginx/nginx.conf 2>&1 | sed 's/^/  /' || true
     log_error ""
     log_error "The default_server block in nginx.conf must have:"
@@ -275,7 +287,7 @@ echo ""
 read -p "Press ENTER to continue with certificate request (or Ctrl+C to abort)... " </dev/tty
 
 # Clean up test token
-docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" run --rm --entrypoint "\
+docker compose $COMPOSE_FLAGS run --rm --entrypoint "\
     rm -f /var/www/certbot/.well-known/acme-challenge/$ACME_TEST_TOKEN" certbot 2>/dev/null || true
 
 # =============================================================================
@@ -305,7 +317,7 @@ for domain in "${DOMAINS[@]}"; do
     # Timeout after 120s: if the challenge hasn't completed by then, something
     # is wrong (DNS, firewall, nginx config) and hanging longer won't help.
     CERTBOT_EXIT=0
-    timeout 120 docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" run --rm certbot certonly \
+    timeout 120 docker compose $COMPOSE_FLAGS run --rm certbot certonly \
         --webroot \
         --webroot-path=/var/www/certbot \
         --email "$EMAIL" \
@@ -328,7 +340,7 @@ for domain in "${DOMAINS[@]}"; do
         log_error "  2. Check port: curl -sI http://$domain/.well-known/acme-challenge/test"
         log_error "     (should return 404, NOT a 301 redirect)"
         log_error "  3. Check firewall: port 80 must be open from the internet"
-        log_error "  4. Check nginx logs: docker compose -f $COMPOSE_FILE -f $LE_COMPOSE_FILE logs nginx"
+        log_error "  4. Check nginx logs: docker compose $COMPOSE_FLAGS logs nginx"
         exit 1
     else
         log_error "Failed to obtain certificate for $domain (exit code: $CERTBOT_EXIT)"
@@ -336,7 +348,7 @@ for domain in "${DOMAINS[@]}"; do
         log_error "  - DNS A/AAAA record for $domain does not point to this server"
         log_error "  - Port 80 is blocked by firewall (Let's Encrypt HTTP-01 challenge needs it)"
         log_error "  - nginx is not serving /.well-known/acme-challenge/ (check nginx logs)"
-        log_error "Debug: docker compose -f $COMPOSE_FILE -f $LE_COMPOSE_FILE logs nginx"
+        log_error "Debug: docker compose $COMPOSE_FLAGS logs nginx"
         exit 1
     fi
 done
@@ -346,7 +358,7 @@ done
 # =============================================================================
 
 log_info "Reloading nginx to use real certificates..."
-docker compose -f "$COMPOSE_FILE" -f "$LE_COMPOSE_FILE" exec nginx nginx -s reload
+docker compose $COMPOSE_FLAGS exec nginx nginx -s reload
 
 if [ $? -eq 0 ]; then
     log_info "nginx reloaded successfully"
@@ -367,7 +379,7 @@ echo ""
 log_info "Next steps:"
 log_info "  1. Verify certificates: docker compose exec nginx ls -la /etc/nginx/certs/live/"
 log_info "  2. Test HTTPS access: curl -I https://${DOMAINS[0]}"
-log_info "  3. Start full stack: docker compose -f $COMPOSE_FILE -f $LE_COMPOSE_FILE up -d"
+log_info "  3. Start full stack: docker compose $COMPOSE_FLAGS up -d"
 echo ""
 log_info "Certificates will auto-renew every 12 hours (if expiring in < 30 days)"
 log_info "Monitor renewal: docker compose logs -f certbot"
