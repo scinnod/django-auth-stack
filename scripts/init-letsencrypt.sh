@@ -25,6 +25,9 @@
 
 set -e  # Exit on any error
 
+# Trap unexpected exits so they are never silent
+trap 'echo "" ; echo -e "\033[0;31m[ERROR]\033[0m Script exited unexpectedly at line $LINENO (exit code $?)" >&2' ERR
+
 # =============================================================================
 # Colors and Helper Functions (defined early — used throughout the script)
 # =============================================================================
@@ -442,6 +445,25 @@ for domain in "${DOMAINS[@]}"; do
     set -e
     echo ""
     
+    log_info "certbot exit code: $CERTBOT_EXIT"
+    
+    # Docker Compose v2 quirk: "docker compose run --rm" sometimes hangs
+    # during container cleanup even after certbot exits successfully.
+    # The timeout kills it → exit code 124. Clean up leftover containers.
+    if [ "$CERTBOT_EXIT" -eq 124 ]; then
+        log_warn "docker compose run was killed by timeout — checking if cert was saved anyway..."
+        # Kill any leftover one-off containers from the timed-out run
+        docker compose $COMPOSE_FLAGS rm -f -s certbot 2>/dev/null || true
+        
+        # Check if certbot actually saved the certificate before the hang
+        CERT_CHECK=$(docker compose $COMPOSE_FLAGS run --rm -T --entrypoint "sh" certbot -c \
+            "test -f /etc/letsencrypt/live/$domain/fullchain.pem && echo exists" 2>/dev/null || true)
+        if echo "$CERT_CHECK" | grep -q "exists"; then
+            log_info "Certificate was saved successfully despite the timeout (Docker Compose cleanup hang)"
+            CERTBOT_EXIT=0
+        fi
+    fi
+    
     if [ "$CERTBOT_EXIT" -eq 0 ]; then
         log_info "Certificate obtained successfully for $domain"
     elif [ "$CERTBOT_EXIT" -eq 124 ]; then
@@ -450,8 +472,8 @@ for domain in "${DOMAINS[@]}"; do
         log_error "Let's Encrypt cannot reach http://$domain/.well-known/acme-challenge/"
         log_error ""
         log_error "--- Certbot debug log (last 40 lines) ---"
-        docker compose $COMPOSE_FLAGS run --rm -T --entrypoint "sh" certbot -c \
-            'cat /var/log/letsencrypt/letsencrypt.log 2>/dev/null | tail -40' 2>&1 | sed 's/^/  /' || true
+        (docker compose $COMPOSE_FLAGS run --rm -T --entrypoint "sh" certbot -c \
+            'cat /var/log/letsencrypt/letsencrypt.log 2>/dev/null | tail -40' 2>&1 | sed 's/^/  /') || true
         log_error ""
         log_error "Troubleshooting:"
         log_error "  1. Check DNS:  dig +short $domain  (must return this server's public IP)"
@@ -464,8 +486,8 @@ for domain in "${DOMAINS[@]}"; do
         log_error "Failed to obtain certificate for $domain (exit code: $CERTBOT_EXIT)"
         log_error ""
         log_error "--- Certbot debug log (last 40 lines) ---"
-        docker compose $COMPOSE_FLAGS run --rm -T --entrypoint "sh" certbot -c \
-            'cat /var/log/letsencrypt/letsencrypt.log 2>/dev/null | tail -40' 2>&1 | sed 's/^/  /' || true
+        (docker compose $COMPOSE_FLAGS run --rm -T --entrypoint "sh" certbot -c \
+            'cat /var/log/letsencrypt/letsencrypt.log 2>/dev/null | tail -40' 2>&1 | sed 's/^/  /') || true
         log_error ""
         log_error "Common causes:"
         log_error "  - DNS A/AAAA record for $domain does not point to this server"
