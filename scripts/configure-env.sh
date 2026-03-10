@@ -412,8 +412,19 @@ log_step "TLS/Let's Encrypt Configuration"
 log_step "=========================================="
 echo ""
 
+default_le_enabled=$(get_existing_value "LETSENCRYPT_ENABLED" "false")
+log_info "Let's Encrypt provides free, automated TLS certificates."
+log_info "Requires: public DNS pointing to this server, port 80 open."
+log_info "For development/internal use, choose 'false' (self-signed certs)."
+echo ""
+LETSENCRYPT_ENABLED=$(prompt_with_default "Enable Let's Encrypt? (true/false)" "$default_le_enabled")
+
 default_le_email=$(get_existing_value "LETSENCRYPT_EMAIL" "admin@example.com")
-LETSENCRYPT_EMAIL=$(prompt_with_default "Email for Let's Encrypt notifications" "$default_le_email")
+if [ "$LETSENCRYPT_ENABLED" = "true" ]; then
+    LETSENCRYPT_EMAIL=$(prompt_with_default "Email for Let's Encrypt notifications" "$default_le_email")
+else
+    LETSENCRYPT_EMAIL="$default_le_email"
+fi
 
 # =============================================================================
 # Service Configuration
@@ -657,6 +668,7 @@ set_env_value "OAUTH2_PROXY_VERSION" "$OAUTH2_PROXY_VERSION"
 set_env_value "DOMAIN_AUTH" "$DOMAIN_AUTH"
 
 # TLS
+set_env_value "LETSENCRYPT_ENABLED" "$LETSENCRYPT_ENABLED"
 set_env_value "LETSENCRYPT_EMAIL" "$LETSENCRYPT_EMAIL"
 
 # Nginx
@@ -739,11 +751,24 @@ echo ""
 log_info "1. Run pre-flight check to verify configuration:"
 log_info "     ./scripts/preflight-check.sh"
 echo ""
-if [ ${#SERVICES_CONFIG[@]} -gt 0 ]; then
-    log_info "2. Generate Docker Compose override for service networks:"
-    log_info "     ./scripts/generate-compose-override.sh"
+# -------------------------------------------------------------------------
+# Auto-generate docker-compose.override.yml
+# -------------------------------------------------------------------------
+if [ ${#SERVICES_CONFIG[@]} -gt 0 ] || [ "$LETSENCRYPT_ENABLED" = "true" ]; then
+    log_info "Generating docker-compose.override.yml..."
     echo ""
-    log_info "3. Create Docker networks for your services:"
+    OVERRIDE_SCRIPT="$SCRIPT_DIR/generate-compose-override.sh"
+    if [ -f "$OVERRIDE_SCRIPT" ]; then
+        bash "$OVERRIDE_SCRIPT"
+    else
+        log_warn "generate-compose-override.sh not found — run it manually:"
+        log_warn "  ./scripts/generate-compose-override.sh"
+    fi
+    echo ""
+fi
+
+if [ ${#SERVICES_CONFIG[@]} -gt 0 ]; then
+    log_info "2. Create Docker networks for your services (if not already created):"
     svc_num=0
     for svc_config in "${SERVICES_CONFIG[@]}"; do
         svc_num=$((svc_num + 1))
@@ -751,7 +776,14 @@ if [ ${#SERVICES_CONFIG[@]} -gt 0 ]; then
         log_info "     docker network create ${network}"
     done
     echo ""
-    log_info "4. Start the stack:"
+    if [ "$LETSENCRYPT_ENABLED" = "true" ]; then
+        log_info "3. Obtain initial Let's Encrypt certificates:"
+        log_info "     ./scripts/init-letsencrypt.sh"
+        echo ""
+        log_info "4. Start the stack:"
+    else
+        log_info "3. Start the stack:"
+    fi
 else
     log_info "2. Start the stack:"
 fi

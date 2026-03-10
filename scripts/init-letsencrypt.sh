@@ -10,9 +10,13 @@
 # configured domains. Run this ONCE before starting the stack in LE mode.
 #
 # Prerequisites:
-#   1. DNS records must point to this server (A/AAAA records)
-#   2. Ports 80 and 443 must be accessible from the internet
-#   3. Docker and docker compose must be installed
+#   1. Set LETSENCRYPT_ENABLED=true in .env
+#   2. DNS records must point to this server (A/AAAA records)
+#   3. Ports 80 and 443 must be accessible from the internet
+#   4. Docker and docker compose must be installed
+#
+# The script will automatically regenerate docker-compose.override.yml
+# (via generate-compose-override.sh) if it doesn't yet include certbot.
 #
 # Usage:
 #   chmod +x scripts/init-letsencrypt.sh
@@ -20,6 +24,27 @@
 # =============================================================================
 
 set -e  # Exit on any error
+
+# =============================================================================
+# Colors and Helper Functions (defined early — used throughout the script)
+# =============================================================================
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+log_info() {
+    echo -e "${GREEN}[INFO]${NC} $1"
+}
+
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
 
 # Load .env file if it exists
 if [ -f .env ]; then
@@ -56,38 +81,61 @@ LE_COMPOSE_FILE="docker-compose.letsencrypt.yml"
 OVERRIDE_FILE="docker-compose.override.yml"
 CERTBOT_IMAGE="certbot/certbot:latest"
 
-# Build the compose file flags.
-# IMPORTANT: When using explicit -f flags, Docker Compose does NOT auto-load
-# docker-compose.override.yml. We must include it manually, otherwise nginx
-# won't join the service networks (itsm_backend, etc.) and will crash with
-# "host not found in upstream".
-COMPOSE_FLAGS="-f $COMPOSE_FILE"
-if [ -f "$OVERRIDE_FILE" ]; then
-    COMPOSE_FLAGS="$COMPOSE_FLAGS -f $OVERRIDE_FILE"
+# =============================================================================
+# Ensure LETSENCRYPT_ENABLED=true and override is up-to-date
+# =============================================================================
+# The override file must include certbot. If it doesn't, we either auto-fix
+# or tell the user exactly what to do.
+
+LE_ENABLED="${LETSENCRYPT_ENABLED:-false}"
+
+if [ "$LE_ENABLED" != "true" ]; then
+    log_error "LETSENCRYPT_ENABLED is not set to 'true' in .env"
+    log_error ""
+    log_error "To enable Let's Encrypt, edit .env and set:"
+    log_error "  LETSENCRYPT_ENABLED=true"
+    log_error ""
+    log_error "Then re-run this script."
+    exit 1
 fi
-COMPOSE_FLAGS="$COMPOSE_FLAGS -f $LE_COMPOSE_FILE"
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+# Check if the override includes certbot config
+OVERRIDE_NEEDS_REGEN=false
+if [ ! -f "$OVERRIDE_FILE" ]; then
+    OVERRIDE_NEEDS_REGEN=true
+elif ! grep -q "certbot" "$OVERRIDE_FILE" 2>/dev/null; then
+    OVERRIDE_NEEDS_REGEN=true
+fi
 
-# =============================================================================
-# Helper Functions
-# =============================================================================
+if [ "$OVERRIDE_NEEDS_REGEN" = "true" ]; then
+    log_warn "docker-compose.override.yml is missing or does not include certbot."
+    log_info "Regenerating it now (running generate-compose-override.sh)..."
+    echo ""
+    if [ -x scripts/generate-compose-override.sh ]; then
+        bash scripts/generate-compose-override.sh
+    elif [ -f scripts/generate-compose-override.sh ]; then
+        bash scripts/generate-compose-override.sh
+    else
+        log_error "scripts/generate-compose-override.sh not found!"
+        log_error "Cannot generate the required override file."
+        exit 1
+    fi
+    echo ""
+    # Verify it worked
+    if ! grep -q "certbot" "$OVERRIDE_FILE" 2>/dev/null; then
+        log_error "Override regeneration failed — certbot still missing from $OVERRIDE_FILE"
+        log_error "Check that LETSENCRYPT_ENABLED=true is in .env and try:"
+        log_error "  ./scripts/generate-compose-override.sh"
+        exit 1
+    fi
+    log_info "Override file regenerated successfully with certbot."
+fi
 
-log_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
-
-log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
+# Build compose file flags.
+# IMPORTANT: When using explicit -f flags, Docker Compose does NOT auto-load
+# docker-compose.override.yml. We must include it explicitly.
+COMPOSE_FLAGS="-f $COMPOSE_FILE -f $OVERRIDE_FILE"
+log_info "Using compose flags: $COMPOSE_FLAGS"
 
 # =============================================================================
 # Preflight Checks
@@ -109,11 +157,6 @@ fi
 # Check if compose files exist
 if [ ! -f "$COMPOSE_FILE" ]; then
     log_error "docker-compose.yml not found!"
-    exit 1
-fi
-
-if [ ! -f "$LE_COMPOSE_FILE" ]; then
-    log_error "docker-compose.letsencrypt.yml not found!"
     exit 1
 fi
 
@@ -311,11 +354,18 @@ for domain in "${DOMAINS[@]}"; do
     log_info "Obtaining certificate for $domain..."
     log_info "  This requires Let's Encrypt to reach http://$domain/.well-known/acme-challenge/"
     log_info "  Ensure DNS points to this server and port 80 is open from the internet."
-    log_info "  This may take 30-90 seconds per domain. Please be patient..."
+    log_info "  This may take 30-90 seconds per domain..."
+    echo ""
     
-    # Run certbot with verbose output so the user can see ACME progress.
+    # Run certbot with debug-level output (-v -v = debug) so the user sees each
+    # ACME protocol step: authz creation, challenge placement, validation poll.
     # Timeout after 120s: if the challenge hasn't completed by then, something
     # is wrong (DNS, firewall, nginx config) and hanging longer won't help.
+    #
+    # Show a progress ticker in the background so the user knows we're alive.
+    ( while true; do sleep 5; printf '.' >&2; done ) &
+    TICKER_PID=$!
+    
     CERTBOT_EXIT=0
     timeout 120 docker compose $COMPOSE_FLAGS run --rm certbot certonly \
         --webroot \
@@ -324,9 +374,13 @@ for domain in "${DOMAINS[@]}"; do
         --agree-tos \
         --no-eff-email \
         --non-interactive \
-        --verbose \
+        -v -v \
         $STAGING_ARG \
-        -d "$domain" || CERTBOT_EXIT=$?
+        -d "$domain" 2>&1 || CERTBOT_EXIT=$?
+    
+    # Stop the progress ticker
+    kill $TICKER_PID 2>/dev/null; wait $TICKER_PID 2>/dev/null
+    echo ""
     
     if [ "$CERTBOT_EXIT" -eq 0 ]; then
         log_info "Certificate obtained successfully for $domain"

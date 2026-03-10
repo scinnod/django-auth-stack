@@ -273,13 +273,35 @@ log_warn "  2. NOT suitable for production use"
 log_warn "  3. Users must manually accept the security exception"
 log_warn "  4. For production, use Let's Encrypt or commercial CA"
 echo ""
+# =============================================================================
+# Set LETSENCRYPT_ENABLED=false (self-signed mode, not Let's Encrypt)
+# =============================================================================
+if [ -f .env ]; then
+    if grep -q '^LETSENCRYPT_ENABLED=' .env; then
+        sed -i 's/^LETSENCRYPT_ENABLED=.*/LETSENCRYPT_ENABLED=false/' .env
+    else
+        echo 'LETSENCRYPT_ENABLED=false' >> .env
+    fi
+    log_info "Set LETSENCRYPT_ENABLED=false in .env"
+fi
+
+# =============================================================================
+# Regenerate docker-compose.override.yml (without certbot)
+# =============================================================================
+if [ -f scripts/generate-compose-override.sh ]; then
+    log_info "Regenerating docker-compose.override.yml (without certbot)..."
+    echo ""
+    bash scripts/generate-compose-override.sh
+    echo ""
+fi
+
 log_info "Next steps:"
-log_info "  1. Update domains in nginx configs (nginx/conf.d/*.conf)"
-log_info "  2. Start the stack: docker compose up -d"
-log_info "  3. Accept browser security warnings when accessing HTTPS"
+log_info "  1. Start the stack: docker compose up -d"
+log_info "  2. Accept browser security warnings when accessing HTTPS"
 echo ""
-log_info "For production, use Let's Encrypt:"
-log_info "  ./scripts/init-letsencrypt.sh"
+log_info "For production, switch to Let's Encrypt:"
+log_info "  1. Set LETSENCRYPT_ENABLED=true in .env"
+log_info "  2. Run: ./scripts/init-letsencrypt.sh"
 echo ""
 
 exit 0
