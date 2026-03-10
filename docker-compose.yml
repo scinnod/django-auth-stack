@@ -96,6 +96,7 @@ services:
       # Realm configuration (optional - for config-as-code)
       - ./keycloak/realms:/opt/keycloak/data/import:ro
     networks:
+      - proxy           # External connectivity (needed for external IdP federation)
       - auth_backend
       - keycloak_db
     depends_on:
