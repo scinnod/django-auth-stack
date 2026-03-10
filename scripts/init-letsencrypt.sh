@@ -381,6 +381,21 @@ if [ "$STAGING" -eq 1 ]; then
     STAGING_ARG="--staging"
 fi
 
+# -------------------------------------------------------------------------
+# Remove dummy certificates so certbot can save real ones
+# -------------------------------------------------------------------------
+# The dummy certs we created earlier live in /etc/letsencrypt/live/<domain>/.
+# Certbot refuses to overwrite existing live directories. Remove them now
+# (the real certs will replace them).
+
+log_info "Removing dummy certificates..."
+for domain in "${DOMAINS[@]}"; do
+    docker compose $COMPOSE_FLAGS run --rm -T --entrypoint "sh" certbot -c \
+        "rm -rf /etc/letsencrypt/live/$domain /etc/letsencrypt/archive/$domain /etc/letsencrypt/renewal/$domain.conf" 2>/dev/null || true
+done
+log_info "  Done"
+echo ""
+
 # Request certificates for all domains
 for domain in "${DOMAINS[@]}"; do
     log_info "============================================================"
@@ -402,7 +417,7 @@ for domain in "${DOMAINS[@]}"; do
     #   --entrypoint certbot = override the renewal-loop entrypoint
     #   PYTHONUNBUFFERED=1   = force Python to flush output immediately
     #   -T                   = no pseudo-TTY (required for scripts)
-    #   -v -v                = debug-level logging (shows HTTP requests to ACME)
+    #   -v                   = verbose logging (shows ACME steps)
     #   --preferred-challenges http = explicitly use HTTP-01
     #
     # Timeout: 180s should be enough for one domain. If it takes longer,
@@ -420,7 +435,7 @@ for domain in "${DOMAINS[@]}"; do
         --no-eff-email \
         --non-interactive \
         --preferred-challenges http \
-        -v -v \
+        -v \
         $STAGING_ARG \
         -d "$domain"
     CERTBOT_EXIT=$?
