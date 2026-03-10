@@ -191,22 +191,15 @@ log_info "(nginx needs valid cert files to start, even before real certs are obt
 # certbot_webroot named volumes (defined in docker-compose.letsencrypt.yml)
 # when we first run the certbot service below. No manual volume creation needed.
 
-# Generate dummy certificates for each domain
-for domain in "${DOMAINS[@]}"; do
-    log_info "Creating dummy certificate for $domain..."
-    
-    docker compose $COMPOSE_FLAGS run --rm --entrypoint "\
-        sh -c 'mkdir -p /etc/letsencrypt/live/$domain && \
-        openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
-        -keyout /etc/letsencrypt/live/$domain/privkey.pem \
-        -out /etc/letsencrypt/live/$domain/fullchain.pem \
-        -subj /CN=localhost'" certbot
-    
-    # Also create symlink at root level for shared cert config
-    docker compose $COMPOSE_FLAGS run --rm --entrypoint "\
-        sh -c 'ln -sf /etc/letsencrypt/live/$domain/fullchain.pem /etc/letsencrypt/fullchain.pem && \
-        ln -sf /etc/letsencrypt/live/$domain/privkey.pem /etc/letsencrypt/privkey.pem'" certbot || true
-done
+# Generate a single dummy certificate at the paths nginx expects.
+# All vhosts share /etc/letsencrypt/fullchain.pem and privkey.pem.
+log_info "Creating dummy certificate..."
+
+docker compose $COMPOSE_FLAGS run --rm --entrypoint "\
+    sh -c 'openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
+    -keyout /etc/letsencrypt/privkey.pem \
+    -out /etc/letsencrypt/fullchain.pem \
+    -subj /CN=localhost'" certbot
 
 # =============================================================================
 # Start nginx
@@ -387,116 +380,125 @@ fi
 # -------------------------------------------------------------------------
 # Remove dummy certificates so certbot can save real ones
 # -------------------------------------------------------------------------
-# The dummy certs we created earlier live in /etc/letsencrypt/live/<domain>/.
-# Certbot refuses to overwrite existing live directories. Remove them now
-# (the real certs will replace them).
+# Clean the certbot volume of any leftover live/archive/renewal data
+# from previous runs (dummy certs or failed attempts).
 
 log_info "Removing dummy certificates..."
-for domain in "${DOMAINS[@]}"; do
-    docker compose $COMPOSE_FLAGS run --rm -T --entrypoint "sh" certbot -c \
-        "rm -rf /etc/letsencrypt/live/$domain /etc/letsencrypt/archive/$domain /etc/letsencrypt/renewal/$domain.conf" 2>/dev/null || true
-done
+docker compose $COMPOSE_FLAGS run --rm -T --entrypoint "sh" certbot -c \
+    "rm -rf /etc/letsencrypt/live /etc/letsencrypt/archive /etc/letsencrypt/renewal \
+     /etc/letsencrypt/fullchain.pem /etc/letsencrypt/privkey.pem" 2>/dev/null || true
 log_info "  Done"
 echo ""
 
-# Request certificates for all domains
+# -------------------------------------------------------------------------
+# Request a single SAN certificate covering all domains
+# -------------------------------------------------------------------------
+# A SAN (Subject Alternative Name) certificate lists all domains in one cert.
+# This is simpler, faster (one ACME request), and matches the nginx config
+# where all vhosts share /etc/letsencrypt/fullchain.pem.
+#
+# Certbot names the certificate after the first domain (CERT_NAME).
+# After issuance, we symlink the cert to the paths nginx expects.
+
+CERT_NAME="${DOMAINS[0]}"
+
+# Build -d flags: -d auth.sst.jade-hs.de -d itsm.sst.jade-hs.de -d ...
+DOMAIN_ARGS=""
 for domain in "${DOMAINS[@]}"; do
-    log_info "============================================================"
-    log_info "Obtaining certificate for $domain..."
-    log_info "============================================================"
-    log_info "  ACME URL: http://$domain/.well-known/acme-challenge/"
-    log_info "  Timeout: 180s per domain"
-    echo ""
-    
-    # Run certbot with debug-level output so the user sees each ACME protocol
-    # step: authorization creation, challenge file placement, validation poll.
-    #
-    # IMPORTANT: --entrypoint "certbot" overrides the service's renewal-loop
-    # entrypoint (sh -c 'while :; do certbot renew --quiet; sleep 12h; done').
-    # Without this override, 'certonly' args are ignored and the container
-    # silently runs the renewal loop → hangs on 'sleep 12h' with no output.
-    #
-    # Key flags:
-    #   --entrypoint certbot = override the renewal-loop entrypoint
-    #   PYTHONUNBUFFERED=1   = force Python to flush output immediately
-    #   -T                   = no pseudo-TTY (required for scripts)
-    #   -v                   = verbose logging (shows ACME steps)
-    #   --preferred-challenges http = explicitly use HTTP-01
-    #
-    # Timeout: 180s should be enough for one domain. If it takes longer,
-    # something is wrong (DNS, firewall, nginx config).
-    
-    set +e
-    timeout 180 docker compose $COMPOSE_FLAGS run --rm -T \
-        -e PYTHONUNBUFFERED=1 \
-        --entrypoint "certbot" \
-        certbot certonly \
-        --webroot \
-        --webroot-path=/var/www/certbot \
-        --email "$EMAIL" \
-        --agree-tos \
-        --no-eff-email \
-        --non-interactive \
-        --preferred-challenges http \
-        -v \
-        $STAGING_ARG \
-        -d "$domain"
-    CERTBOT_EXIT=$?
-    set -e
-    echo ""
-    
-    log_info "certbot exit code: $CERTBOT_EXIT"
-    
-    # Docker Compose v2 quirk: "docker compose run --rm" sometimes hangs
-    # during container cleanup even after certbot exits successfully.
-    # The timeout kills it → exit code 124. Clean up leftover containers.
-    if [ "$CERTBOT_EXIT" -eq 124 ]; then
-        log_warn "docker compose run was killed by timeout — checking if cert was saved anyway..."
-        # Kill any leftover one-off containers from the timed-out run
-        docker compose $COMPOSE_FLAGS rm -f -s certbot 2>/dev/null || true
-        
-        # Check if certbot actually saved the certificate before the hang
-        CERT_CHECK=$(docker compose $COMPOSE_FLAGS run --rm -T --entrypoint "sh" certbot -c \
-            "test -f /etc/letsencrypt/live/$domain/fullchain.pem && echo exists" 2>/dev/null || true)
-        if echo "$CERT_CHECK" | grep -q "exists"; then
-            log_info "Certificate was saved successfully despite the timeout (Docker Compose cleanup hang)"
-            CERTBOT_EXIT=0
-        fi
-    fi
-    
-    if [ "$CERTBOT_EXIT" -eq 0 ]; then
-        log_info "Certificate obtained successfully for $domain"
-    elif [ "$CERTBOT_EXIT" -eq 124 ]; then
-        log_error "Timed out after 180s waiting for certificate for $domain"
-        log_error "The ACME HTTP-01 challenge did not complete. This usually means"
-        log_error "Let's Encrypt cannot reach http://$domain/.well-known/acme-challenge/"
-        log_error ""
-        log_error "--- Certbot debug log (last 40 lines) ---"
-        (docker compose $COMPOSE_FLAGS run --rm -T --entrypoint "sh" certbot -c \
-            'cat /var/log/letsencrypt/letsencrypt.log 2>/dev/null | tail -40' 2>&1 | sed 's/^/  /') || true
-        log_error ""
-        log_error "Troubleshooting:"
-        log_error "  1. Check DNS:  dig +short $domain  (must return this server's public IP)"
-        log_error "  2. Check port: curl -sI http://$domain/.well-known/acme-challenge/test"
-        log_error "     (should return 404, NOT a 301 redirect)"
-        log_error "  3. Check firewall: port 80 must be open from the internet"
-        log_error "  4. Check nginx logs: docker compose $COMPOSE_FLAGS logs nginx"
-        exit 1
-    else
-        log_error "Failed to obtain certificate for $domain (exit code: $CERTBOT_EXIT)"
-        log_error ""
-        log_error "--- Certbot debug log (last 40 lines) ---"
-        (docker compose $COMPOSE_FLAGS run --rm -T --entrypoint "sh" certbot -c \
-            'cat /var/log/letsencrypt/letsencrypt.log 2>/dev/null | tail -40' 2>&1 | sed 's/^/  /') || true
-        log_error ""
-        log_error "Common causes:"
-        log_error "  - DNS A/AAAA record for $domain does not point to this server"
-        log_error "  - Port 80 is blocked by firewall (Let's Encrypt HTTP-01 challenge needs it)"
-        log_error "  - nginx is not serving /.well-known/acme-challenge/ (check nginx logs)"
-        log_error "Debug: docker compose $COMPOSE_FLAGS logs nginx"
-        exit 1
-    fi
+    DOMAIN_ARGS="$DOMAIN_ARGS -d $domain"
 done
+
+log_info "============================================================"
+log_info "Obtaining SAN certificate for all domains..."
+log_info "============================================================"
+log_info "  Domains: ${DOMAINS[*]}"
+log_info "  Certificate name: $CERT_NAME"
+log_info "  Timeout: 180s"
+echo ""
+
+# IMPORTANT: --entrypoint "certbot" overrides the service's renewal-loop
+# entrypoint. Without this, 'certonly' args are ignored.
+
+set +e
+timeout 180 docker compose $COMPOSE_FLAGS run --rm -T \
+    -e PYTHONUNBUFFERED=1 \
+    --entrypoint "certbot" \
+    certbot certonly \
+    --webroot \
+    --webroot-path=/var/www/certbot \
+    --email "$EMAIL" \
+    --agree-tos \
+    --no-eff-email \
+    --non-interactive \
+    --preferred-challenges http \
+    -v \
+    $STAGING_ARG \
+    $DOMAIN_ARGS
+CERTBOT_EXIT=$?
+set -e
+echo ""
+
+log_info "certbot exit code: $CERTBOT_EXIT"
+
+# Docker Compose v2 quirk: "docker compose run --rm" sometimes hangs
+# during container cleanup even after certbot exits successfully.
+# The timeout kills it → exit code 124. Clean up leftover containers.
+if [ "$CERTBOT_EXIT" -eq 124 ]; then
+    log_warn "docker compose run was killed by timeout — checking if cert was saved anyway..."
+    docker compose $COMPOSE_FLAGS rm -f -s certbot 2>/dev/null || true
+    
+    CERT_CHECK=$(docker compose $COMPOSE_FLAGS run --rm -T --entrypoint "sh" certbot -c \
+        "test -f /etc/letsencrypt/live/$CERT_NAME/fullchain.pem && echo exists" 2>/dev/null || true)
+    if echo "$CERT_CHECK" | grep -q "exists"; then
+        log_info "Certificate was saved successfully despite the timeout (Docker Compose cleanup hang)"
+        CERTBOT_EXIT=0
+    fi
+fi
+
+if [ "$CERTBOT_EXIT" -eq 0 ]; then
+    log_info "Certificate obtained successfully for: ${DOMAINS[*]}"
+elif [ "$CERTBOT_EXIT" -eq 124 ]; then
+    log_error "Timed out after 180s waiting for certificate"
+    log_error "The ACME HTTP-01 challenge did not complete."
+    log_error ""
+    log_error "--- Certbot debug log (last 40 lines) ---"
+    (docker compose $COMPOSE_FLAGS run --rm -T --entrypoint "sh" certbot -c \
+        'cat /var/log/letsencrypt/letsencrypt.log 2>/dev/null | tail -40' 2>&1 | sed 's/^/  /') || true
+    log_error ""
+    log_error "Troubleshooting:"
+    log_error "  1. Check DNS for each domain:  dig +short <domain>"
+    log_error "  2. Check port 80: curl -sI http://<domain>/.well-known/acme-challenge/test"
+    log_error "  3. Check firewall: port 80 must be open from the internet"
+    log_error "  4. Check nginx logs: docker compose $COMPOSE_FLAGS logs nginx"
+    exit 1
+else
+    log_error "Failed to obtain certificate (exit code: $CERTBOT_EXIT)"
+    log_error ""
+    log_error "--- Certbot debug log (last 40 lines) ---"
+    (docker compose $COMPOSE_FLAGS run --rm -T --entrypoint "sh" certbot -c \
+        'cat /var/log/letsencrypt/letsencrypt.log 2>/dev/null | tail -40' 2>&1 | sed 's/^/  /') || true
+    log_error ""
+    log_error "Common causes:"
+    log_error "  - DNS A/AAAA record for a domain does not point to this server"
+    log_error "  - Port 80 is blocked by firewall"
+    log_error "  - nginx is not serving /.well-known/acme-challenge/"
+    log_error "Debug: docker compose $COMPOSE_FLAGS logs nginx"
+    exit 1
+fi
+
+# -------------------------------------------------------------------------
+# Symlink certificate to paths nginx expects
+# -------------------------------------------------------------------------
+# Certbot saves certs to /etc/letsencrypt/live/<cert-name>/.
+# nginx vhosts all reference /etc/letsencrypt/fullchain.pem (root level).
+# Create symlinks so nginx finds them.
+
+log_info "Creating certificate symlinks for nginx..."
+docker compose $COMPOSE_FLAGS run --rm -T --entrypoint "sh" certbot -c \
+    "ln -sf /etc/letsencrypt/live/$CERT_NAME/fullchain.pem /etc/letsencrypt/fullchain.pem && \
+     ln -sf /etc/letsencrypt/live/$CERT_NAME/privkey.pem /etc/letsencrypt/privkey.pem"
+log_info "  /etc/letsencrypt/fullchain.pem -> live/$CERT_NAME/fullchain.pem"
+log_info "  /etc/letsencrypt/privkey.pem   -> live/$CERT_NAME/privkey.pem"
 
 # =============================================================================
 # Reload nginx with Real Certificates
@@ -521,8 +523,10 @@ log_info "=========================================="
 log_info "Let's Encrypt initialization complete!"
 log_info "=========================================="
 echo ""
+log_info "SAN certificate covers: ${DOMAINS[*]}"
+log_info ""
 log_info "Next steps:"
-log_info "  1. Verify certificates: docker compose exec nginx ls -la /etc/nginx/certs/live/"
+log_info "  1. Verify certificate: docker compose $COMPOSE_FLAGS exec nginx openssl x509 -in /etc/letsencrypt/fullchain.pem -noout -text | grep DNS"
 log_info "  2. Test HTTPS access: curl -I https://${DOMAINS[0]}"
 log_info "  3. Start full stack: docker compose $COMPOSE_FLAGS up -d"
 echo ""
