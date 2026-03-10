@@ -26,7 +26,7 @@
 set -e  # Exit on any error
 
 # Trap unexpected exits so they are never silent
-trap 'echo "" ; echo -e "\033[0;31m[ERROR]\033[0m Script exited unexpectedly at line $LINENO (exit code $?)" >&2' ERR
+trap '_ec=$?; echo "" ; echo -e "\033[0;31m[ERROR]\033[0m Script exited unexpectedly at line $LINENO (exit code $_ec)" >&2' ERR
 
 # =============================================================================
 # Colors and Helper Functions (defined early — used throughout the script)
@@ -350,9 +350,10 @@ set +e
 ACME_CONN=$(timeout 20 docker compose $COMPOSE_FLAGS run --rm -T \
     --entrypoint "sh" certbot -c \
     'wget -q -O /dev/null --timeout=10 https://acme-v02.api.letsencrypt.org/directory 2>&1; echo "EXIT:$?"' 2>&1)
+ACME_RC=$?
 set -e
 
-if echo "$ACME_CONN" | grep -q "EXIT:0"; then
+if [ "$ACME_RC" -eq 0 ] || echo "$ACME_CONN" | grep -q "EXIT:0"; then
     log_info "  ACME server is reachable from certbot container"
 else
     log_error "Cannot reach Let's Encrypt ACME server from certbot container!"
@@ -436,7 +437,6 @@ timeout 180 docker compose $COMPOSE_FLAGS run --rm -T \
     $DOMAIN_ARGS
 CERTBOT_EXIT=$?
 set -e
-echo ""
 
 log_info "certbot exit code: $CERTBOT_EXIT"
 
