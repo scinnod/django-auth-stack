@@ -458,13 +458,15 @@ if $IS_RECONFIGURE && [ ${#EXISTING_SERVICES[@]} -gt 0 ]; then
         svc_domain="${EXISTING_ENV[SERVICE_${idx}_DOMAIN]:-}"
         svc_upstream="${EXISTING_ENV[SERVICE_${idx}_UPSTREAM]:-}"
         svc_network="${EXISTING_ENV[SERVICE_${idx}_NETWORK]:-}"
+        svc_max_body_size="${EXISTING_ENV[SERVICE_${idx}_MAX_BODY_SIZE]:-}"
         
         echo ""
         log_service "Service: ${svc_name}"
-        echo "  Domain:   $svc_domain"
-        echo "  Upstream: $svc_upstream"
-        echo "  Pattern:  $svc_pattern"
-        echo "  Enabled:  $svc_enabled"
+        echo "  Domain:        $svc_domain"
+        echo "  Upstream:      $svc_upstream"
+        echo "  Pattern:       $svc_pattern"
+        echo "  Enabled:       $svc_enabled"
+        echo "  Max body size: ${svc_max_body_size:-<default: ${CLIENT_MAX_BODY_SIZE}>}"
         echo ""
         
         # Show appropriate toggle option based on current state
@@ -479,7 +481,7 @@ if $IS_RECONFIGURE && [ ${#EXISTING_SERVICES[@]} -gt 0 ]; then
         case "$action" in
             K)
                 # Keep as-is
-                SERVICES_CONFIG+=("$svc_name|$svc_enabled|$svc_pattern|$svc_domain|$svc_upstream|$svc_network")
+                SERVICES_CONFIG+=("$svc_name|$svc_enabled|$svc_pattern|$svc_domain|$svc_upstream|$svc_network|$svc_max_body_size")
                 log_info "  Keeping service: $svc_name"
                 ;;
             E)
@@ -495,6 +497,10 @@ if $IS_RECONFIGURE && [ ${#EXISTING_SERVICES[@]} -gt 0 ]; then
                 new_pattern=$(prompt_with_default "    Pattern (A/B)" "$svc_pattern")
                 new_pattern=$(echo "$new_pattern" | tr '[:lower:]' '[:upper:]')
                 
+                echo "    Max upload body size (e.g., 50M, 100M, 1G)"
+                echo "    Leave empty to use global default (CLIENT_MAX_BODY_SIZE=${CLIENT_MAX_BODY_SIZE})"
+                new_max_body_size=$(prompt_with_default "    Max body size" "$svc_max_body_size")
+                
                 read -p "    Enable service? (Y/n): " new_enabled
                 if [[ "$new_enabled" =~ ^[Nn]$ ]]; then
                     new_enabled="false"
@@ -502,17 +508,17 @@ if $IS_RECONFIGURE && [ ${#EXISTING_SERVICES[@]} -gt 0 ]; then
                     new_enabled="true"
                 fi
                 
-                SERVICES_CONFIG+=("$svc_name|$new_enabled|$new_pattern|$new_domain|$new_upstream|$new_network")
+                SERVICES_CONFIG+=("$svc_name|$new_enabled|$new_pattern|$new_domain|$new_upstream|$new_network|$new_max_body_size")
                 log_info "  Updated service: $svc_name"
                 ;;
             D)
                 # Disable (keep config but set enabled=false)
-                SERVICES_CONFIG+=("$svc_name|false|$svc_pattern|$svc_domain|$svc_upstream|$svc_network")
+                SERVICES_CONFIG+=("$svc_name|false|$svc_pattern|$svc_domain|$svc_upstream|$svc_network|$svc_max_body_size")
                 log_info "  Disabled service: $svc_name"
                 ;;
             N)
                 # Enable (keep config but set enabled=true)
-                SERVICES_CONFIG+=("$svc_name|true|$svc_pattern|$svc_domain|$svc_upstream|$svc_network")
+                SERVICES_CONFIG+=("$svc_name|true|$svc_pattern|$svc_domain|$svc_upstream|$svc_network|$svc_max_body_size")
                 log_info "  Enabled service: $svc_name"
                 ;;
             R)
@@ -521,7 +527,7 @@ if $IS_RECONFIGURE && [ ${#EXISTING_SERVICES[@]} -gt 0 ]; then
                 ;;
             *)
                 # Default: keep
-                SERVICES_CONFIG+=("$svc_name|$svc_enabled|$svc_pattern|$svc_domain|$svc_upstream|$svc_network")
+                SERVICES_CONFIG+=("$svc_name|$svc_enabled|$svc_pattern|$svc_domain|$svc_upstream|$svc_network|$svc_max_body_size")
                 log_info "  Keeping service: $svc_name"
                 ;;
         esac
@@ -593,7 +599,13 @@ while true; do
         new_enabled="true"
     fi
     
-    SERVICES_CONFIG+=("$new_name|$new_enabled|$new_pattern|$new_domain|$new_upstream|$new_network")
+    # Max body size
+    echo ""
+    echo "  Max upload body size (e.g., 50M, 100M, 1G)"
+    echo "  Leave empty to use global default (CLIENT_MAX_BODY_SIZE=${CLIENT_MAX_BODY_SIZE})"
+    new_max_body_size=$(prompt_with_default "  Max body size (Enter for default)" "")
+    
+    SERVICES_CONFIG+=("$new_name|$new_enabled|$new_pattern|$new_domain|$new_upstream|$new_network|$new_max_body_size")
     log_info "  Added service: $new_name"
 done
 
@@ -694,7 +706,7 @@ if [ ${#SERVICES_CONFIG[@]} -gt 0 ]; then
     for svc_config in "${SERVICES_CONFIG[@]}"; do
         svc_num=$((svc_num + 1))
         
-        IFS='|' read -r name enabled pattern domain upstream network <<< "$svc_config"
+        IFS='|' read -r name enabled pattern domain upstream network max_body_size <<< "$svc_config"
         
         echo "" >> "$ENV_TEMP"
         echo "# --- Service ${svc_num}: ${name} ---" >> "$ENV_TEMP"
@@ -704,6 +716,9 @@ if [ ${#SERVICES_CONFIG[@]} -gt 0 ]; then
         echo "SERVICE_${svc_num}_DOMAIN=${domain}" >> "$ENV_TEMP"
         echo "SERVICE_${svc_num}_UPSTREAM=${upstream}" >> "$ENV_TEMP"
         echo "SERVICE_${svc_num}_NETWORK=${network}" >> "$ENV_TEMP"
+        if [ -n "$max_body_size" ]; then
+            echo "SERVICE_${svc_num}_MAX_BODY_SIZE=${max_body_size}" >> "$ENV_TEMP"
+        fi
     done
 fi
 

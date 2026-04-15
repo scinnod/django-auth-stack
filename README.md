@@ -18,6 +18,7 @@ Production-ready authentication gateway combining nginx reverse proxy with Keycl
 - **Dynamic Service Configuration** - Configure any number of upstream services via `.env`
 - **Two Authentication Patterns** - Django-controlled (Pattern A) or full protection (Pattern B)
 - **Per-Service Enable/Disable** - Toggle services on/off without removing configuration
+- **Per-Service Upload Limits** - Override `client_max_body_size` per service or use global default
 - **Config-as-Code** - Manage Keycloak via JSON realm exports (no clicking!)
 - **Network Segmentation** - Defense-in-depth with isolated Docker networks
 - **Dual TLS Mode** - Provided certificates or Let's Encrypt
@@ -192,14 +193,16 @@ SERVICE_1_PATTERN=A                       # A or B (see patterns below)
 SERVICE_1_DOMAIN=myapp.example.local      # Domain for this service
 SERVICE_1_UPSTREAM=myapp_nginx:8000       # Container:port to proxy to
 SERVICE_1_NETWORK=myapp_backend           # Docker network name
+# SERVICE_1_MAX_BODY_SIZE=50M             # (Optional) Max upload size override
 
-# --- Service 2: Another App ---
+# --- Service 2: Another App (with larger uploads) ---
 SERVICE_2_NAME=admin
 SERVICE_2_ENABLED=true
 SERVICE_2_PATTERN=B
 SERVICE_2_DOMAIN=admin.example.local
 SERVICE_2_UPSTREAM=admin_app:3000
 SERVICE_2_NETWORK=admin_backend
+SERVICE_2_MAX_BODY_SIZE=100M              # Allow larger file uploads for this service
 ```
 
 ### Authentication Patterns
@@ -256,6 +259,30 @@ SERVICE_2_ENABLED=false   # Temporarily disabled
 ```
 
 Then restart nginx: `docker compose restart nginx`
+
+### Per-Service Upload Size Limit
+
+Each upstream service can have its own `client_max_body_size` for file uploads. The value is resolved with this fallback chain:
+
+```
+SERVICE_N_MAX_BODY_SIZE  →  CLIENT_MAX_BODY_SIZE (.env global)  →  50M (hardcoded default)
+```
+
+**Override for a specific service:**
+```bash
+# In .env - allow larger uploads for one service
+SERVICE_2_MAX_BODY_SIZE=100M
+```
+
+**Change the global default for all services:**
+```bash
+# In .env - applies to services without a per-service override
+CLIENT_MAX_BODY_SIZE=100M
+```
+
+**Keycloak/auth** is not affected — it inherits the `http`-level default (`50m`) from `nginx.conf`, which is appropriate for authentication operations.
+
+> **Important:** The edge nginx is the first gate. If your downstream service allows larger uploads (e.g., `client_max_body_size 100M` in the downstream nginx), you must set at least the same value on the edge nginx via `SERVICE_N_MAX_BODY_SIZE`. Otherwise uploads between the two limits are rejected before reaching downstream.
 
 ---
 
@@ -325,6 +352,7 @@ SERVICE_1_PATTERN=A
 SERVICE_1_DOMAIN=myapp.example.local
 SERVICE_1_UPSTREAM=myapp_nginx:8000
 SERVICE_1_NETWORK=myapp_backend
+# SERVICE_1_MAX_BODY_SIZE=55M  # Optional: override global upload limit
 ```
 
 **Generate secrets:**
@@ -783,6 +811,7 @@ This stack is **production-ready** with the following configurations:
 - Proper proxy headers (X-Forwarded-*, X-Real-IP)
 - WebSocket support
 - Health check endpoint
+- **Per-service `client_max_body_size`** with global default fallback (`CLIENT_MAX_BODY_SIZE`, default 50M)
 - **Rate limiting for Keycloak admin console only** (5 req/s, protects against brute-force)
 - OIDC endpoints are not rate-limited (Keycloak has built-in brute-force protection)
 

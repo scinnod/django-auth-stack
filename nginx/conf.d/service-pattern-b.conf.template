@@ -66,6 +66,12 @@ server {
     error_log /var/log/nginx/__SERVICE_NAME__.error.log warn;
 
     # -------------------------------------------------------------------------
+    # Upload Size Limit (per-service override)
+    # -------------------------------------------------------------------------
+    # Set via SERVICE_<N>_MAX_BODY_SIZE in .env (falls back to CLIENT_MAX_BODY_SIZE)
+    client_max_body_size __SERVICE_MAX_BODY_SIZE__;
+
+    # -------------------------------------------------------------------------
     # OAuth2 Proxy Integration
     # -------------------------------------------------------------------------
     # Sign-out: nginx handles full SSO logout (oauth2-proxy v7.6.0 doesn't do OIDC logout)

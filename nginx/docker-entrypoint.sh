@@ -113,6 +113,13 @@ for i in $(seq 1 99); do
     eval upstream="\${$upstream_var:-}"
     eval network="\${$network_var:-}"
     
+    # Resolve max body size: per-service override > global CLIENT_MAX_BODY_SIZE > 50m
+    max_body_size_var="SERVICE_${i}_MAX_BODY_SIZE"
+    eval max_body_size="\${$max_body_size_var:-}"
+    if [ -z "$max_body_size" ]; then
+        max_body_size="${CLIENT_MAX_BODY_SIZE:-50M}"
+    fi
+
     # Skip disabled services
     if [ "$enabled" != "true" ]; then
         echo "[nginx-entrypoint] Skipping disabled service: $name"
@@ -153,6 +160,7 @@ for i in $(seq 1 99); do
     echo "[nginx-entrypoint]   Domain: $domain"
     echo "[nginx-entrypoint]   Upstream: $upstream"
     echo "[nginx-entrypoint]   Network: ${network:-not specified}"
+    echo "[nginx-entrypoint]   Max body size: $max_body_size"
     
     # First: Substitute service-specific placeholders (using sed)
     # Then: Substitute global environment variables (using envsubst)
@@ -160,6 +168,7 @@ for i in $(seq 1 99); do
         -e "s|__SERVICE_DOMAIN__|${domain}|g" \
         -e "s|__SERVICE_UPSTREAM__|${upstream}|g" \
         -e "s|__SERVICE_NETWORK__|${network}|g" \
+        -e "s|__SERVICE_MAX_BODY_SIZE__|${max_body_size}|g" \
         "$template" | \
     envsubst '${DOMAIN_AUTH} ${KEYCLOAK_REALM} ${OAUTH2_PROXY_COOKIE_DOMAIN} ${OAUTH2_PROXY_CLIENT_ID}' \
         > "$output_file"

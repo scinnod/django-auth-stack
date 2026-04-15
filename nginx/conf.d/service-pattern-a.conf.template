@@ -69,6 +69,12 @@ server {
     error_log /var/log/nginx/__SERVICE_NAME__.error.log warn;
 
     # -------------------------------------------------------------------------
+    # Upload Size Limit (per-service override)
+    # -------------------------------------------------------------------------
+    # Set via SERVICE_<N>_MAX_BODY_SIZE in .env (falls back to CLIENT_MAX_BODY_SIZE)
+    client_max_body_size __SERVICE_MAX_BODY_SIZE__;
+
+    # -------------------------------------------------------------------------
     # PUBLIC PATHS - No authentication required
     # -------------------------------------------------------------------------
     # These paths bypass OAuth2-proxy completely. Django handles them directly.
