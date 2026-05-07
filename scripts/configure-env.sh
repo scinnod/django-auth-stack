@@ -442,6 +442,13 @@ log_info "Authentication Patterns:"
 log_info "  Pattern A: Django-controlled auth (public + protected pages)"
 log_info "  Pattern B: Full nginx-level auth (everything protected)"
 echo ""
+log_info "Access Restriction (Pattern B only):"
+log_info "  ALLOWED_EMAIL_DOMAIN: Restrict to users whose email matches a domain"
+log_info "                        e.g. 'jade-hs.de' allows only *@jade-hs.de"
+log_info "  ALLOWED_GROUP:        Restrict to members of a Keycloak group"
+log_info "                        e.g. 'restricted-users'"
+log_info "  Both set = AND logic (user must satisfy both conditions)"
+echo ""
 
 # Array to store final service configurations
 declare -a SERVICES_CONFIG
@@ -459,14 +466,20 @@ if $IS_RECONFIGURE && [ ${#EXISTING_SERVICES[@]} -gt 0 ]; then
         svc_upstream="${EXISTING_ENV[SERVICE_${idx}_UPSTREAM]:-}"
         svc_network="${EXISTING_ENV[SERVICE_${idx}_NETWORK]:-}"
         svc_max_body_size="${EXISTING_ENV[SERVICE_${idx}_MAX_BODY_SIZE]:-}"
+        svc_allowed_email_domain="${EXISTING_ENV[SERVICE_${idx}_ALLOWED_EMAIL_DOMAIN]:-}"
+        svc_allowed_group="${EXISTING_ENV[SERVICE_${idx}_ALLOWED_GROUP]:-}"
         
         echo ""
         log_service "Service: ${svc_name}"
-        echo "  Domain:        $svc_domain"
-        echo "  Upstream:      $svc_upstream"
-        echo "  Pattern:       $svc_pattern"
-        echo "  Enabled:       $svc_enabled"
-        echo "  Max body size: ${svc_max_body_size:-<default: ${CLIENT_MAX_BODY_SIZE}>}"
+        echo "  Domain:              $svc_domain"
+        echo "  Upstream:            $svc_upstream"
+        echo "  Pattern:             $svc_pattern"
+        echo "  Enabled:             $svc_enabled"
+        echo "  Max body size:       ${svc_max_body_size:-<default: ${CLIENT_MAX_BODY_SIZE}>}"
+        if [ "$svc_pattern" = "B" ] || [ "$svc_pattern" = "b" ]; then
+            echo "  Allowed email domain:${svc_allowed_email_domain:- <all>}"
+            echo "  Allowed group:       ${svc_allowed_group:- <not restricted>}"
+        fi
         echo ""
         
         # Show appropriate toggle option based on current state
@@ -481,7 +494,7 @@ if $IS_RECONFIGURE && [ ${#EXISTING_SERVICES[@]} -gt 0 ]; then
         case "$action" in
             K)
                 # Keep as-is
-                SERVICES_CONFIG+=("$svc_name|$svc_enabled|$svc_pattern|$svc_domain|$svc_upstream|$svc_network|$svc_max_body_size")
+                SERVICES_CONFIG+=("$svc_name|$svc_enabled|$svc_pattern|$svc_domain|$svc_upstream|$svc_network|$svc_max_body_size|$svc_allowed_email_domain|$svc_allowed_group")
                 log_info "  Keeping service: $svc_name"
                 ;;
             E)
@@ -501,6 +514,19 @@ if $IS_RECONFIGURE && [ ${#EXISTING_SERVICES[@]} -gt 0 ]; then
                 echo "    Leave empty to use global default (CLIENT_MAX_BODY_SIZE=${CLIENT_MAX_BODY_SIZE})"
                 new_max_body_size=$(prompt_with_default "    Max body size" "$svc_max_body_size")
                 
+                if [ "$new_pattern" = "B" ]; then
+                    echo ""
+                    echo "    Access restriction (Pattern B only, leave empty for no restriction):"
+                    new_allowed_email_domain=$(prompt_with_default "    Allowed email domain (e.g. jade-hs.de)" "$svc_allowed_email_domain")
+                    new_allowed_group=$(prompt_with_default "    Allowed Keycloak group (e.g. restricted-users)" "$svc_allowed_group")
+                else
+                    new_allowed_email_domain=""
+                    new_allowed_group=""
+                    if [ -n "$svc_allowed_email_domain" ] || [ -n "$svc_allowed_group" ]; then
+                        log_warn "    Pattern A selected: access restrictions are ignored (cleared)"
+                    fi
+                fi
+                
                 read -p "    Enable service? (Y/n): " new_enabled
                 if [[ "$new_enabled" =~ ^[Nn]$ ]]; then
                     new_enabled="false"
@@ -508,17 +534,17 @@ if $IS_RECONFIGURE && [ ${#EXISTING_SERVICES[@]} -gt 0 ]; then
                     new_enabled="true"
                 fi
                 
-                SERVICES_CONFIG+=("$svc_name|$new_enabled|$new_pattern|$new_domain|$new_upstream|$new_network|$new_max_body_size")
+                SERVICES_CONFIG+=("$svc_name|$new_enabled|$new_pattern|$new_domain|$new_upstream|$new_network|$new_max_body_size|$new_allowed_email_domain|$new_allowed_group")
                 log_info "  Updated service: $svc_name"
                 ;;
             D)
                 # Disable (keep config but set enabled=false)
-                SERVICES_CONFIG+=("$svc_name|false|$svc_pattern|$svc_domain|$svc_upstream|$svc_network|$svc_max_body_size")
+                SERVICES_CONFIG+=("$svc_name|false|$svc_pattern|$svc_domain|$svc_upstream|$svc_network|$svc_max_body_size|$svc_allowed_email_domain|$svc_allowed_group")
                 log_info "  Disabled service: $svc_name"
                 ;;
             N)
                 # Enable (keep config but set enabled=true)
-                SERVICES_CONFIG+=("$svc_name|true|$svc_pattern|$svc_domain|$svc_upstream|$svc_network|$svc_max_body_size")
+                SERVICES_CONFIG+=("$svc_name|true|$svc_pattern|$svc_domain|$svc_upstream|$svc_network|$svc_max_body_size|$svc_allowed_email_domain|$svc_allowed_group")
                 log_info "  Enabled service: $svc_name"
                 ;;
             R)
@@ -527,7 +553,7 @@ if $IS_RECONFIGURE && [ ${#EXISTING_SERVICES[@]} -gt 0 ]; then
                 ;;
             *)
                 # Default: keep
-                SERVICES_CONFIG+=("$svc_name|$svc_enabled|$svc_pattern|$svc_domain|$svc_upstream|$svc_network|$svc_max_body_size")
+                SERVICES_CONFIG+=("$svc_name|$svc_enabled|$svc_pattern|$svc_domain|$svc_upstream|$svc_network|$svc_max_body_size|$svc_allowed_email_domain|$svc_allowed_group")
                 log_info "  Keeping service: $svc_name"
                 ;;
         esac
@@ -591,6 +617,19 @@ while true; do
     new_pattern=$(prompt_with_default "  Pattern (A/B)" "A")
     new_pattern=$(echo "$new_pattern" | tr '[:lower:]' '[:upper:]')
     
+    # Access restriction (Pattern B only)
+    new_allowed_email_domain=""
+    new_allowed_group=""
+    if [ "$new_pattern" = "B" ]; then
+        echo ""
+        echo "  Access restriction (leave empty to allow all authenticated users):"
+        new_allowed_email_domain=$(prompt_with_default "  Allowed email domain (e.g. jade-hs.de, Enter for all)" "")
+        new_allowed_group=$(prompt_with_default "  Allowed Keycloak group (e.g. restricted-users, Enter for none)" "")
+    else
+        echo ""
+        log_info "  (Access restrictions are only available for Pattern B services)"
+    fi
+    
     # Enabled
     read -p "  Enable this service? (Y/n): " new_enabled
     if [[ "$new_enabled" =~ ^[Nn]$ ]]; then
@@ -605,7 +644,7 @@ while true; do
     echo "  Leave empty to use global default (CLIENT_MAX_BODY_SIZE=${CLIENT_MAX_BODY_SIZE})"
     new_max_body_size=$(prompt_with_default "  Max body size (Enter for default)" "")
     
-    SERVICES_CONFIG+=("$new_name|$new_enabled|$new_pattern|$new_domain|$new_upstream|$new_network|$new_max_body_size")
+    SERVICES_CONFIG+=("$new_name|$new_enabled|$new_pattern|$new_domain|$new_upstream|$new_network|$new_max_body_size|$new_allowed_email_domain|$new_allowed_group")
     log_info "  Added service: $new_name"
 done
 
@@ -706,7 +745,7 @@ if [ ${#SERVICES_CONFIG[@]} -gt 0 ]; then
     for svc_config in "${SERVICES_CONFIG[@]}"; do
         svc_num=$((svc_num + 1))
         
-        IFS='|' read -r name enabled pattern domain upstream network max_body_size <<< "$svc_config"
+        IFS='|' read -r name enabled pattern domain upstream network max_body_size allowed_email_domain allowed_group <<< "$svc_config"
         
         echo "" >> "$ENV_TEMP"
         echo "# --- Service ${svc_num}: ${name} ---" >> "$ENV_TEMP"
@@ -718,6 +757,12 @@ if [ ${#SERVICES_CONFIG[@]} -gt 0 ]; then
         echo "SERVICE_${svc_num}_NETWORK=${network}" >> "$ENV_TEMP"
         if [ -n "$max_body_size" ]; then
             echo "SERVICE_${svc_num}_MAX_BODY_SIZE=${max_body_size}" >> "$ENV_TEMP"
+        fi
+        if [ -n "$allowed_email_domain" ]; then
+            echo "SERVICE_${svc_num}_ALLOWED_EMAIL_DOMAIN=${allowed_email_domain}" >> "$ENV_TEMP"
+        fi
+        if [ -n "$allowed_group" ]; then
+            echo "SERVICE_${svc_num}_ALLOWED_GROUP=${allowed_group}" >> "$ENV_TEMP"
         fi
     done
 fi

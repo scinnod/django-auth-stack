@@ -120,6 +120,23 @@ for i in $(seq 1 99); do
         max_body_size="${CLIENT_MAX_BODY_SIZE:-50M}"
     fi
 
+    # Access restriction vars (Pattern B only)
+    allowed_email_domain_var="SERVICE_${i}_ALLOWED_EMAIL_DOMAIN"
+    allowed_group_var="SERVICE_${i}_ALLOWED_GROUP"
+    eval allowed_email_domain="\${$allowed_email_domain_var:-}"
+    eval allowed_group="\${$allowed_group_var:-}"
+
+    # Determine which oauth2-proxy instance to use:
+    # If any access restriction is configured, each restricted service gets its
+    # own dedicated proxy container (named oauth2-proxy-<name>) so it can enforce
+    # per-service --email-domain and/or --allowed-group flags independently.
+    # Unrestricted services share the default edge_oauth2_proxy instance.
+    if [ -n "$allowed_email_domain" ] || [ -n "$allowed_group" ]; then
+        service_oauth2_proxy="oauth2-proxy-${name}"
+    else
+        service_oauth2_proxy="edge_oauth2_proxy"
+    fi
+
     # Skip disabled services
     if [ "$enabled" != "true" ]; then
         echo "[nginx-entrypoint] Skipping disabled service: $name"
@@ -161,6 +178,7 @@ for i in $(seq 1 99); do
     echo "[nginx-entrypoint]   Upstream: $upstream"
     echo "[nginx-entrypoint]   Network: ${network:-not specified}"
     echo "[nginx-entrypoint]   Max body size: $max_body_size"
+    echo "[nginx-entrypoint]   OAuth2 proxy: $service_oauth2_proxy"
     
     # First: Substitute service-specific placeholders (using sed)
     # Then: Substitute global environment variables (using envsubst)
@@ -169,6 +187,7 @@ for i in $(seq 1 99); do
         -e "s|__SERVICE_UPSTREAM__|${upstream}|g" \
         -e "s|__SERVICE_NETWORK__|${network}|g" \
         -e "s|__SERVICE_MAX_BODY_SIZE__|${max_body_size}|g" \
+        -e "s|__SERVICE_OAUTH2_PROXY__|${service_oauth2_proxy}|g" \
         "$template" | \
     envsubst '${DOMAIN_AUTH} ${KEYCLOAK_REALM} ${OAUTH2_PROXY_COOKIE_DOMAIN} ${OAUTH2_PROXY_CLIENT_ID}' \
         > "$output_file"

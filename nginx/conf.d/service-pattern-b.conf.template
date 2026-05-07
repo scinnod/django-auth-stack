@@ -101,7 +101,7 @@ server {
     
     # All other OAuth2 endpoints (auth, start, callback) go to oauth2-proxy
     location /oauth2/ {
-        proxy_pass http://edge_oauth2_proxy:4180;
+        proxy_pass http://__SERVICE_OAUTH2_PROXY__:4180;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -110,11 +110,43 @@ server {
     }
 
     # -------------------------------------------------------------------------
+    # Auth error handlers
+    # -------------------------------------------------------------------------
+    # @oauth2_unauthorized handles 401 from oauth2-proxy:
+    #   - Cookie present → the user IS authenticated (valid SSO session from
+    #     another service) but rejected by THIS service's email-domain or group
+    #     restriction. Redirecting to login would create an infinite loop because
+    #     Keycloak would auto-approve them and oauth2-proxy would reject again.
+    #     Return 403 to break the loop and show an access-denied page instead.
+    #   - No cookie → genuinely unauthenticated → start normal login flow.
+    #
+    # @oauth2_forbidden handles 403 from oauth2-proxy (authenticated but the
+    # proxy explicitly returned Forbidden rather than Unauthorized).
+    #
+    location @oauth2_unauthorized {
+        default_type text/html;
+        if ($cookie__oauth2_proxy) {
+            return 403 '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Access Denied</title><style>body{font-family:sans-serif;margin:80px auto;max-width:500px;padding:0 20px;color:#333}h1{color:#c00}</style></head><body><h1>403 Access Denied</h1><p>You are authenticated but do not have permission to access this service.</p><p>Please contact your administrator if you believe you should have access.</p><p><a href="/oauth2/sign_out">Sign out</a> to log in with a different account.</p></body></html>';
+        }
+        return 302 /oauth2/start?rd=$scheme://$http_host$request_uri;
+    }
+
+    location @oauth2_forbidden {
+        default_type text/html;
+        return 403 '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Access Denied</title><style>body{font-family:sans-serif;margin:80px auto;max-width:500px;padding:0 20px;color:#333}h1{color:#c00}</style></head><body><h1>403 Access Denied</h1><p>You are authenticated but do not have permission to access this service.</p><p>Please contact your administrator if you believe you should have access.</p><p><a href="/oauth2/sign_out">Sign out</a> to log in with a different account.</p></body></html>';
+    }
+
+    # -------------------------------------------------------------------------
     # ALL PATHS - Require authentication
     # -------------------------------------------------------------------------
     location / {
         auth_request /oauth2/auth;
-        error_page 401 = /oauth2/start?rd=$scheme://$http_host$request_uri;
+
+        # 401: not authenticated, or authenticated but rejected by an access
+        #      restriction (email domain / group). See @oauth2_unauthorized.
+        error_page 401 = @oauth2_unauthorized;
+        # 403: oauth2-proxy explicitly returned Forbidden for this session.
+        error_page 403 = @oauth2_forbidden;
         
         auth_request_set $user $upstream_http_x_auth_request_user;
         auth_request_set $email $upstream_http_x_auth_request_email;

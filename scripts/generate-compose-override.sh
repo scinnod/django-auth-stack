@@ -65,18 +65,23 @@ set -a
 source .env
 set +a
 
-# Collect enabled service networks
+# Collect enabled service networks and access restrictions
 declare -a networks
+declare -a restricted_services  # names of services needing a dedicated proxy
 service_count=0
 
 for i in $(seq 1 99); do
     name_var="SERVICE_${i}_NAME"
     enabled_var="SERVICE_${i}_ENABLED"
     network_var="SERVICE_${i}_NETWORK"
+    allowed_email_domain_var="SERVICE_${i}_ALLOWED_EMAIL_DOMAIN"
+    allowed_group_var="SERVICE_${i}_ALLOWED_GROUP"
     
     eval name="\${$name_var:-}"
     eval enabled="\${$enabled_var:-true}"
     eval network="\${$network_var:-}"
+    eval allowed_email_domain="\${$allowed_email_domain_var:-}"
+    eval allowed_group="\${$allowed_group_var:-}"
     
     # Stop if no more services defined
     [ -z "$name" ] && break
@@ -94,6 +99,12 @@ for i in $(seq 1 99); do
             networks+=("$network")
             log_info "Adding network: $network (for $name)"
         fi
+    fi
+    
+    # Track services that need a dedicated oauth2-proxy
+    if [ -n "$allowed_email_domain" ] || [ -n "$allowed_group" ]; then
+        restricted_services+=("$i:$name:$allowed_email_domain:$allowed_group")
+        log_info "Access restriction for $name: email_domain='${allowed_email_domain:-*}' group='${allowed_group:-(none)}'"
     fi
     
     service_count=$((service_count + 1))
@@ -167,6 +178,81 @@ if [ "$LE_ENABLED" = "true" ]; then
 EOF
 fi
 
+# --- Per-service restricted oauth2-proxy instances ---
+# Each Pattern B service with ALLOWED_EMAIL_DOMAIN or ALLOWED_GROUP gets its
+# own oauth2-proxy container so it can enforce per-service access rules.
+#
+# IMPORTANT: The command flags below mirror the base edge_oauth2_proxy definition
+# in docker-compose.yml. If you update the base proxy flags (e.g. to add scopes,
+# change PKCE method, etc.), you must update this block as well.
+if [ ${#restricted_services[@]} -gt 0 ]; then
+    for entry in "${restricted_services[@]}"; do
+        IFS=':' read -r svc_i svc_name svc_email_domain svc_group <<< "$entry"
+        
+        log_info "Generating dedicated oauth2-proxy for: $svc_name"
+        
+        # Build restriction flags
+        restriction_flags=""
+        if [ -n "$svc_email_domain" ]; then
+            restriction_flags="${restriction_flags}\n      - --email-domain=${svc_email_domain}"
+        else
+            restriction_flags="${restriction_flags}\n      - --email-domain=*"
+        fi
+        if [ -n "$svc_group" ]; then
+            # Keycloak group paths require a leading slash
+            restriction_flags="${restriction_flags}\n      - --allowed-group=/${svc_group}"
+        fi
+        
+        cat >> "$OUTPUT_FILE" << EOF
+
+  # ---------------------------------------------------------------------------
+  # Dedicated oauth2-proxy for: $svc_name
+  # Restrictions: email_domain='${svc_email_domain:-*}'  group='${svc_group:-(none)}'
+  # ---------------------------------------------------------------------------
+  oauth2-proxy-${svc_name}:
+    image: quay.io/oauth2-proxy/oauth2-proxy:\${OAUTH2_PROXY_VERSION:-v7.6.0}
+    container_name: edge_oauth2_proxy_${svc_name}
+    restart: unless-stopped
+    command:
+      - --http-address=0.0.0.0:4180
+      - --upstream=static://202
+      - --cookie-secure=true
+      - --cookie-domain=\${OAUTH2_PROXY_COOKIE_DOMAIN:-.example.org}
+      - --whitelist-domain=\${OAUTH2_PROXY_COOKIE_DOMAIN:-.example.org}
+      - --provider=oidc
+      - --provider-display-name=Keycloak
+      - --scope=openid email profile
+      - --oidc-email-claim=email
+      - --oidc-groups-claim=groups
+      - --oidc-issuer-url=http://keycloak:8080/realms/\${KEYCLOAK_REALM:-master}
+      - --redirect-url=https://\${DOMAIN_AUTH:-auth.example.org}/oauth2/callback
+      - --reverse-proxy=true
+      - --set-xauthrequest=true
+      - --pass-user-headers=true
+      - --pass-access-token=true
+      - --pass-authorization-header=true
+      - --set-authorization-header=true
+      - --skip-provider-button=true
+      - --insecure-oidc-skip-issuer-verification=true
+      - --ssl-insecure-skip-verify=true
+      - --insecure-oidc-allow-unverified-email=true
+      - --skip-claims-from-profile-url=true
+      - --code-challenge-method=S256$(printf "%b" "$restriction_flags")
+    environment:
+      OAUTH2_PROXY_CLIENT_ID: \${OAUTH2_PROXY_CLIENT_ID}
+      OAUTH2_PROXY_CLIENT_SECRET: \${OAUTH2_PROXY_CLIENT_SECRET}
+      OAUTH2_PROXY_COOKIE_SECRET: \${OAUTH2_PROXY_COOKIE_SECRET}
+    networks:
+      - auth_backend
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+EOF
+    done
+fi
+
 # Add networks section
 cat >> "$OUTPUT_FILE" << 'EOF'
 
@@ -180,6 +266,15 @@ for network in "${networks[@]}"; do
     external: true
 EOF
 done
+
+# auth_backend is needed by any dedicated oauth2-proxy instance.
+# It is defined in docker-compose.yml so we just reference it here.
+if [ ${#restricted_services[@]} -gt 0 ]; then
+    cat >> "$OUTPUT_FILE" << 'EOF'
+  auth_backend:
+    external: false
+EOF
+fi
 
 # --- Let's Encrypt: add volume definitions ---
 if [ "$LE_ENABLED" = "true" ]; then
@@ -204,6 +299,13 @@ log_info "Configured $service_count service(s) with ${#networks[@]} network(s):"
 for network in "${networks[@]}"; do
     log_info "  - $network"
 done
+if [ ${#restricted_services[@]} -gt 0 ]; then
+    log_info "Dedicated oauth2-proxy instances: ${#restricted_services[@]}"
+    for entry in "${restricted_services[@]}"; do
+        IFS=':' read -r svc_i svc_name svc_email_domain svc_group <<< "$entry"
+        log_info "  - oauth2-proxy-${svc_name}  (email_domain='${svc_email_domain:-*}'  group='${svc_group:-(none)}')"
+    done
+fi
 if [ "$LE_ENABLED" = "true" ]; then
     log_info "Let's Encrypt: certbot service and volumes included"
 fi

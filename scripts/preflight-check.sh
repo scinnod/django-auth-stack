@@ -406,6 +406,23 @@ if [ "$DOCKER_AVAILABLE" = true ]; then
             check_network "$network"
             networks_checked=$((networks_checked + 1))
         fi
+        
+        # Warn if access restrictions are configured for a Pattern A service
+        # (restrictions are silently ignored at nginx level for Pattern A)
+        pattern_var="SERVICE_${i}_PATTERN"
+        allowed_email_domain_var="SERVICE_${i}_ALLOWED_EMAIL_DOMAIN"
+        allowed_group_var="SERVICE_${i}_ALLOWED_GROUP"
+        eval svc_pattern="\${$pattern_var:-A}"
+        eval svc_allowed_email_domain="\${$allowed_email_domain_var:-}"
+        eval svc_allowed_group="\${$allowed_group_var:-}"
+        
+        if [ "$svc_pattern" != "B" ] && [ "$svc_pattern" != "b" ]; then
+            if [ -n "$svc_allowed_email_domain" ] || [ -n "$svc_allowed_group" ]; then
+                log_warn "Service '$name' has access restrictions set but uses Pattern $svc_pattern (not B)"
+                log_info "  ALLOWED_EMAIL_DOMAIN and ALLOWED_GROUP are only enforced for Pattern B services."
+                log_info "  Either change the pattern to B or remove the restriction vars."
+            fi
+        fi
     done
     
     if [ $networks_checked -eq 0 ]; then

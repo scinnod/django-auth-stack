@@ -161,7 +161,24 @@ def dashboard(request):
 
 ## Pattern B: Full nginx-Level Authentication
 
-For services where everything should be protected (e.g., translation service).
+For services where everything should be protected — internal tools, admin dashboards, confidential services.
+
+### Access Restriction (Pattern B only)
+
+Pattern B supports optional per-service access restrictions configured in `.env`. Authenticated users who do not meet the restriction receive a **403 Access Denied** page instead of being redirected to login (which would cause an infinite loop via Keycloak SSO).
+
+| Variable | Effect |
+|---|---|
+| `SERVICE_N_ALLOWED_EMAIL_DOMAIN=jade-hs.de` | Only users whose email ends with `@jade-hs.de` are allowed |
+| `SERVICE_N_ALLOWED_GROUP=restricted-users` | Only members of the Keycloak group `/restricted-users` are allowed |
+| Both set | User must satisfy **both** conditions (AND logic) |
+| Neither set | All authenticated users are allowed (default) |
+
+**How the 403 is triggered:**  
+When a restricted-but-authenticated user hits the service, oauth2-proxy returns 401. nginx detects that the `_oauth2_proxy` session cookie is already present (user is authenticated via SSO), so it knows this is an authorisation failure — not a missing login — and returns a 403 page directly. Without this check, the user would be caught in a login redirect loop (Keycloak auto-approves the already-logged-in user, oauth2-proxy rejects again, repeat).
+
+**One-time Keycloak setup for group restriction:**  
+Clients → your client → Client Scopes → Add mapper → **Group Membership**, token claim name: `groups`.
 
 ### Django Configuration (Pattern B)
 
