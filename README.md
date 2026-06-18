@@ -620,6 +620,26 @@ openssl dhparam -out certs/dhparam.pem 2048
    docker compose up -d
    ```
 
+### ⚠️ Important: nginx Must Be Reloaded After Certificate Renewal
+
+Certbot renews the certificate automatically, but **nginx does not pick up the new certificate until it is reloaded**. Without a reload, nginx continues serving the old certificate even after renewal — which will eventually lead to TLS errors once the old cert expires.
+
+Add the following line to the server's crontab (`crontab -e`) to reload nginx every Tuesday at 3 AM:
+
+```cron
+0 3 * * 2 docker exec edge_nginx nginx -s reload
+```
+
+**Why this works:**
+- `nginx -s reload` performs a graceful reload — no connections are dropped
+- Running once per week is sufficient: Let's Encrypt certificates are valid for 90 days and certbot renews when fewer than 30 days remain, so nginx will pick up any renewed certificate within at most 7 days
+- 3 AM Tuesday is a sensible low-traffic window
+- The container name `edge_nginx` matches the `container_name` defined in `docker-compose.yml`
+
+> **Note:** An alternative is to configure a certbot deploy hook
+> (`--deploy-hook "docker exec edge_nginx nginx -s reload"`), but the cron
+> approach above is simpler and sufficient for this setup.
+
 ---
 
 ## Network Architecture
