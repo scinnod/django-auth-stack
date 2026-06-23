@@ -627,7 +627,7 @@ Certbot renews the certificate automatically, but **nginx does not pick up the n
 Add the following line to the server's crontab (`crontab -e`) to reload nginx every Tuesday at 3 AM:
 
 ```cron
-0 3 * * 2 docker exec edge_nginx nginx -s reload
+0 3 * * 2 docker exec edge_nginx nginx -s reload > /dev/null 2>&1
 ```
 
 **Why this works:**
@@ -635,6 +635,7 @@ Add the following line to the server's crontab (`crontab -e`) to reload nginx ev
 - Running once per week is sufficient: Let's Encrypt certificates are valid for 90 days and certbot renews when fewer than 30 days remain, so nginx will pick up any renewed certificate within at most 7 days
 - 3 AM Tuesday is a sensible low-traffic window
 - The container name `edge_nginx` matches the `container_name` defined in `docker-compose.yml`
+- `> /dev/null 2>&1` suppresses output so cron does not email root on every run; nginx produces harmless informational warnings on reload (e.g. OCSP stapling notices when using Let's Encrypt certificates, which decommissioned their OCSP service in August 2025)
 
 > **Note:** An alternative is to configure a certbot deploy hook
 > (`--deploy-hook "docker exec edge_nginx nginx -s reload"`), but the cron
